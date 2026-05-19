@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, Optional, Union
+from typing import Iterable, Literal, Optional, Union
 
 import anndata as ad
 import numpy as np
@@ -24,7 +24,7 @@ from ._gam import GamFit, fit_nb_gam_block
 from ._knots import find_knots
 from ._offset import compute_offset
 
-__all__ = ["evaluate_k", "plot_evaluatek_results"]
+__all__ = ["evaluate_k", "evaluate_k2", "plot_evaluatek_results"]
 
 
 def _compute_edf1(
@@ -206,6 +206,283 @@ def _resolve_inputs(
     return counts, pseudotime, cell_weights, conditions_cat
 
 
+def _joblib_prefer(
+    backend: Literal["threads", "processes"],
+) -> Literal["threads", "processes"]:
+    if backend not in {"threads", "processes"}:
+        raise ValueError("backend must be either 'threads' or 'processes'.")
+    return backend
+
+
+def _validate_evaluate_k_grid(
+    k_range: Iterable[int],
+    n_lam: int,
+    log_lam_range: tuple[float, float],
+) -> tuple[list[int], int, tuple[float, float]]:
+    k_list = [int(kk) for kk in k_range]
+    if any(kk < 3 for kk in k_list):
+        raise ValueError("Cannot fit with fewer than 3 knots, please increase k.")
+    if len(k_list) == 1:
+        raise ValueError("There should be more than one k value")
+    n_lam_int = int(n_lam)
+    if n_lam_int < 2:
+        raise ValueError("n_lam must be at least 2.")
+    if len(log_lam_range) != 2:
+        raise ValueError("log_lam_range must be a length-2 tuple.")
+    log_lam_tuple = (float(log_lam_range[0]), float(log_lam_range[1]))
+    if not log_lam_tuple[0] < log_lam_tuple[1]:
+        raise ValueError("log_lam_range must be strictly increasing.")
+    return k_list, n_lam_int, log_lam_tuple
+
+
+def _evaluate_k_core(
+    adata: ad.AnnData,
+    *,
+    layer: str,
+    pseudotime_key: str,
+    weights_key: str,
+    k_range: Iterable[int],
+    n_genes: int,
+    plot: bool,
+    aic_diff: float,
+    random_state: int,
+    verbose: bool,
+    parallel: bool,
+    n_jobs: int,
+    U: Optional[np.ndarray],
+    sample_weights: Optional[np.ndarray],
+    offset: Optional[np.ndarray],
+    family: str,
+    gcv: bool,
+    conditions: Optional[str],
+    _w_samp: Optional[np.ndarray],
+    score_mode: Literal["reconstruct", "direct"],
+    progress_name: str,
+    n_lam: int = 31,
+    log_lam_range: tuple[float, float] = (-8.0, 18.0),
+    warm_start_lam: bool = False,
+    backend: Optional[Literal["threads", "processes"]] = None,
+    batch_size: int | str = "auto",
+) -> Union[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Shared implementation for ``evaluate_k`` and ``evaluate_k2``.
+
+    The only broad exception handling is the per-gene GAM fit wrapper. That is
+    not a fallback path: it mirrors R ``evaluateK`` where a single failed
+    ``mgcv::gam`` call becomes ``NA`` instead of aborting the whole diagnostic.
+    Input validation, design construction, AIC reconstruction, and plotting
+    errors are intentionally allowed to propagate.
+    """
+    k_list, n_lam_int, log_lam_tuple = _validate_evaluate_k_grid(
+        k_range, n_lam, log_lam_range
+    )
+    prefer = None if backend is None else _joblib_prefer(backend)
+
+    counts_cn, pseudotime, cell_weights, conditions_cat = _resolve_inputs(
+        adata,
+        layer=layer,
+        pseudotime_key=pseudotime_key,
+        weights_key=weights_key,
+        conditions=conditions,
+    )
+    n_cells, n_total_genes = counts_cn.shape
+    counts_gc = counts_cn.T  # gene × cell
+
+    if family == "nb" and (counts_gc < 0).any():
+        raise ValueError("All values of the count matrix should be non-negative")
+
+    if U is None:
+        U_mat = np.ones((n_cells, 1), dtype=np.float64)
+    else:
+        U_mat = np.asarray(U, dtype=np.float64)
+        if U_mat.ndim == 1:
+            U_mat = U_mat[:, None]
+        if U_mat.shape[0] != n_cells:
+            raise ValueError("The dimensions of U do not match those of counts.")
+
+    # Offset on the full matrix — mirrors evaluateK.R:9-18.
+    if offset is None:
+        offset_arr = compute_offset(None, counts_gc)
+    else:
+        offset_arr = np.asarray(offset, dtype=np.float64)
+    if offset_arr.ndim == 2:
+        if offset_arr.shape != (n_total_genes, n_cells):
+            raise ValueError(
+                f"2-D offset must have shape (n_total_genes, n_cells)="
+                f"({n_total_genes}, {n_cells}); got {offset_arr.shape}."
+            )
+    elif offset_arr.ndim != 1:
+        raise ValueError(
+            f"offset must be 1-D (n_cells,) or 2-D (n_total_genes, n_cells); "
+            f"got ndim={offset_arr.ndim}."
+        )
+
+    # geneSub <- sample(seq_len(nrow(counts)), nGenes) — evaluateK.R:21.
+    # R's `sample(seq_len(n), nGenes)` errors when nGenes > n; mirror that.
+    if int(n_genes) > n_total_genes:
+        raise ValueError(
+            f"n_genes={int(n_genes)} exceeds the number of available genes "
+            f"({n_total_genes}); cannot draw a subsample without replacement."
+        )
+    rng = np.random.default_rng(random_state)
+    gene_sub = rng.choice(n_total_genes, size=int(n_genes), replace=False)
+
+    if sample_weights is not None:
+        sw = np.asarray(sample_weights, dtype=np.float64)
+        if sw.shape != (n_total_genes, n_cells):
+            raise ValueError(
+                "sample_weights must have shape (n_total_genes, n_cells)."
+            )
+    else:
+        sw = None
+
+    n_pick = int(n_genes)
+    aic_mat = np.full((n_pick, len(k_list)), np.nan, dtype=np.float64)
+    gcv_mat = np.full((n_pick, len(k_list)), np.nan, dtype=np.float64)
+
+    for kk_idx, kk in enumerate(k_list):
+        # R re-draws .assignCells(cellWeights) inside every .fitGAM call
+        # (fitGAM.R:230), so each k gets an independent multinomial sample.
+        # When `_w_samp` is supplied we replay the same R-side draw for every
+        # k (deterministic validation hook).
+        w_samp = assign_cells(cell_weights, rng=rng, _w_samp=_w_samp)
+        knots_list = find_knots(kk, pseudotime, w_samp)
+        if conditions_cat is None:
+            design = build_smooth_design(
+                pseudotime=pseudotime,
+                w_samp=w_samp,
+                U=U_mat,
+                knots_list=knots_list,
+                offset=(
+                    offset_arr if offset_arr.ndim == 1
+                    else offset_arr[int(gene_sub[0]), :]
+                ),
+            )
+        else:
+            design = build_smooth_design_with_conditions(
+                pseudotime=pseudotime,
+                w_samp=w_samp,
+                U=U_mat,
+                knots_list=knots_list,
+                offset=(
+                    offset_arr if offset_arr.ndim == 1
+                    else offset_arr[int(gene_sub[0]), :]
+                ),
+                conditions=conditions_cat,
+            )
+        X = design.lpmatrix.values
+        S = design.S
+
+        def _fit_one_gene_for_k(g_local: int, g_global: int) -> tuple[float, float]:
+            del g_local
+            y = counts_gc[int(g_global), :]
+            w_obs = None
+            if sw is not None:
+                w_obs = sw[int(g_global), :]
+            # Per-gene offset slice when 2-D offset was supplied (R:
+            # `offset[teller,]` at fitGAM.R:262).
+            if offset_arr.ndim == 1:
+                gene_offset = offset_arr
+            else:
+                gene_offset = offset_arr[int(g_global), :]
+
+            try:
+                # R uses try(withCallingHandlers(...)) around each mgcv::gam.
+                # Capturing warnings here preserves that per-fit boundary
+                # without treating numerical warnings as a second algorithm.
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")
+                    fit = fit_nb_gam_block(
+                        y=y,
+                        X=X,
+                        S=S,
+                        offset=gene_offset,
+                        weights=w_obs,
+                        n_lam=n_lam_int,
+                        log_lam_range=log_lam_tuple,
+                        family=family,
+                        warm_start_lam=warm_start_lam,
+                    )
+            except Exception:
+                return np.nan, np.nan
+
+            if score_mode == "direct":
+                return fit.aic, fit.gcv
+            if score_mode != "reconstruct":
+                raise ValueError(
+                    "score_mode must be either 'reconstruct' or 'direct'."
+                )
+
+            eta = X @ fit.beta + gene_offset
+            eta = np.clip(eta, -50.0, 50.0)
+            mu = np.exp(eta)
+            weights_for_aic = (
+                np.ones_like(y, dtype=np.float64) if w_obs is None else w_obs
+            )
+            edf_trace, edf1 = _compute_edf1(
+                fit, X, S, gene_offset, weights_for_aic, family
+            )
+            aic_val = _nb_aic(y, mu, fit.alpha, edf1, weights=w_obs)
+            _ = edf_trace
+            return aic_val, fit.gcv
+
+        gene_items = list(enumerate(gene_sub))
+        if parallel:
+            if prefer is None:
+                fit_values = Parallel(n_jobs=n_jobs)(
+                    delayed(_fit_one_gene_for_k)(g_local, int(g_global))
+                    for g_local, g_global in gene_items
+                )
+            else:
+                fit_values = Parallel(
+                    n_jobs=n_jobs,
+                    prefer=prefer,
+                    batch_size=batch_size,
+                )(
+                    delayed(_fit_one_gene_for_k)(g_local, int(g_global))
+                    for g_local, g_global in gene_items
+                )
+        else:
+            iterable = gene_items
+            if verbose:
+                iterable = tqdm(
+                    gene_items,
+                    total=len(gene_items),
+                    desc=f"{progress_name} k={kk}",
+                )
+            fit_values = [
+                _fit_one_gene_for_k(g_local, int(g_global))
+                for g_local, g_global in iterable
+            ]
+
+        for g_local, (aic_val, gcv_val) in enumerate(fit_values):
+            aic_mat[g_local, kk_idx] = aic_val
+            gcv_mat[g_local, kk_idx] = gcv_val
+
+    row_index = pd.Index(
+        adata.var_names[np.asarray(gene_sub, dtype=np.int64)],
+        name=None,
+    )
+    cols = [f"k: {k}" for k in k_list]
+    aic_df = pd.DataFrame(aic_mat, index=row_index, columns=cols)
+    gcv_df = pd.DataFrame(gcv_mat, index=row_index, columns=cols)
+
+    if plot:
+        fig = plot_evaluatek_results(aic_df, k_range=k_list, aic_diff=aic_diff)
+        aic_df.attrs["plot"] = fig
+        try:
+            from IPython.display import display
+        except ImportError:
+            pass
+        else:
+            display(fig)
+
+    if gcv:
+        if plot:
+            gcv_df.attrs["plot"] = aic_df.attrs["plot"]
+        return {"aic": aic_df, "gcv": gcv_df}
+    return aic_df
+
+
 def evaluate_k(
     adata: ad.AnnData,
     *,
@@ -321,209 +598,103 @@ def evaluate_k(
         ``aicMat`` row/col names). When ``gcv=True``, a dict with keys
         ``"aic"`` and ``"gcv"`` carrying two such DataFrames.
     """
-    k_list = [int(kk) for kk in k_range]
-    if any(kk < 3 for kk in k_list):
-        raise ValueError("Cannot fit with fewer than 3 knots, please increase k.")
-    if len(k_list) == 1:
-        raise ValueError("There should be more than one k value")
-
-    counts_cn, pseudotime, cell_weights, conditions_cat = _resolve_inputs(
+    return _evaluate_k_core(
         adata,
         layer=layer,
         pseudotime_key=pseudotime_key,
         weights_key=weights_key,
+        k_range=k_range,
+        n_genes=n_genes,
+        plot=plot,
+        aic_diff=aic_diff,
+        random_state=random_state,
+        verbose=verbose,
+        parallel=parallel,
+        n_jobs=n_jobs,
+        U=U,
+        sample_weights=sample_weights,
+        offset=offset,
+        family=family,
+        gcv=gcv,
         conditions=conditions,
+        _w_samp=_w_samp,
+        score_mode="reconstruct",
+        progress_name="evaluate_k",
     )
-    n_cells, n_total_genes = counts_cn.shape
-    counts_gc = counts_cn.T  # gene × cell
 
-    if family == "nb" and (counts_gc < 0).any():
-        raise ValueError("All values of the count matrix should be non-negative")
 
-    if U is None:
-        U_mat = np.ones((n_cells, 1), dtype=np.float64)
-    else:
-        U_mat = np.asarray(U, dtype=np.float64)
-        if U_mat.ndim == 1:
-            U_mat = U_mat[:, None]
-        if U_mat.shape[0] != n_cells:
-            raise ValueError("The dimensions of U do not match those of counts.")
+def evaluate_k2(
+    adata: ad.AnnData,
+    *,
+    layer: str = "counts",
+    pseudotime_key: str = "pseudotime",
+    weights_key: str = "cell_weights",
+    k_range: Iterable[int] = range(3, 11),
+    n_genes: int = 500,
+    plot: bool = True,
+    aic_diff: float = 2.0,
+    random_state: int = 176201,
+    verbose: bool = True,
+    parallel: bool = False,
+    n_jobs: int = 1,
+    backend: Literal["threads", "processes"] = "threads",
+    batch_size: int | str = "auto",
+    U: Optional[np.ndarray] = None,
+    sample_weights: Optional[np.ndarray] = None,
+    offset: Optional[np.ndarray] = None,
+    family: str = "nb",
+    gcv: bool = False,
+    conditions: Optional[str] = None,
+    n_lam: int = 31,
+    log_lam_range: tuple[float, float] = (-8.0, 18.0),
+    warm_start_lam: bool = True,
+    _w_samp: Optional[np.ndarray] = None,
+) -> Union[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Optimized ``evaluate_k`` variant for expensive knot diagnostics.
 
-    # Offset on the full matrix — mirrors evaluateK.R:9-18.
-    if offset is None:
-        offset_arr = compute_offset(None, counts_gc)
-    else:
-        offset_arr = np.asarray(offset, dtype=np.float64)
-    if offset_arr.ndim == 2:
-        if offset_arr.shape != (n_total_genes, n_cells):
-            raise ValueError(
-                f"2-D offset must have shape (n_total_genes, n_cells)="
-                f"({n_total_genes}, {n_cells}); got {offset_arr.shape}."
-            )
-    elif offset_arr.ndim != 1:
-        raise ValueError(
-            f"offset must be 1-D (n_cells,) or 2-D (n_total_genes, n_cells); "
-            f"got ndim={offset_arr.ndim}."
-        )
+    ``evaluate_k2`` keeps the public AnnData contract, the sampled-gene
+    semantics, the per-``k`` cell-assignment draws, and the returned table
+    layout of :func:`evaluate_k`. It differs only in the fit path:
 
-    # geneSub <- sample(seq_len(nrow(counts)), nGenes) — evaluateK.R:21.
-    # R's `sample(seq_len(n), nGenes)` errors when nGenes > n; mirror that.
-    if int(n_genes) > n_total_genes:
-        raise ValueError(
-            f"n_genes={int(n_genes)} exceeds the number of available genes "
-            f"({n_total_genes}); cannot draw a subsample without replacement."
-        )
-    rng = np.random.default_rng(random_state)
-    gene_sub = rng.choice(n_total_genes, size=int(n_genes), replace=False)
+    - it uses :attr:`tradeseq._gam.GamFit.aic` and ``.gcv`` directly instead
+      of reconstructing AIC after every fit;
+    - it defaults to warm-starting the λ-grid scan inside each outer α loop;
+    - when ``parallel=True``, it defaults to joblib's thread preference so the
+      shared count/design arrays are not repeatedly serialized to worker
+      processes.
 
-    if sample_weights is not None:
-        sw = np.asarray(sample_weights, dtype=np.float64)
-        if sw.shape != (n_total_genes, n_cells):
-            raise ValueError(
-                "sample_weights must have shape (n_total_genes, n_cells)."
-            )
-    else:
-        sw = None
-
-    n_pick = int(n_genes)
-    aic_mat = np.full((n_pick, len(k_list)), np.nan, dtype=np.float64)
-    gcv_mat = np.full((n_pick, len(k_list)), np.nan, dtype=np.float64)
-
-    for kk_idx, kk in enumerate(k_list):
-        # R re-draws .assignCells(cellWeights) inside every .fitGAM call
-        # (fitGAM.R:230), so each k gets an independent multinomial sample.
-        # When `_w_samp` is supplied we replay the same R-side draw for every
-        # k (deterministic validation hook).
-        w_samp = assign_cells(cell_weights, rng=rng, _w_samp=_w_samp)
-        knots_list = find_knots(kk, pseudotime, w_samp)
-        if conditions_cat is None:
-            design = build_smooth_design(
-                pseudotime=pseudotime,
-                w_samp=w_samp,
-                U=U_mat,
-                knots_list=knots_list,
-                offset=(
-                    offset_arr if offset_arr.ndim == 1
-                    else offset_arr[int(gene_sub[0]), :]
-                ),
-            )
-        else:
-            design = build_smooth_design_with_conditions(
-                pseudotime=pseudotime,
-                w_samp=w_samp,
-                U=U_mat,
-                knots_list=knots_list,
-                offset=(
-                    offset_arr if offset_arr.ndim == 1
-                    else offset_arr[int(gene_sub[0]), :]
-                ),
-                conditions=conditions_cat,
-            )
-        X = design.lpmatrix.values
-        S = design.S
-
-        def _fit_one_gene_for_k(g_local: int, g_global: int) -> tuple[float, float]:
-            y = counts_gc[int(g_global), :]
-            w_obs = None
-            if sw is not None:
-                w_obs = sw[int(g_global), :]
-            # Per-gene offset slice when 2-D offset was supplied (R:
-            # `offset[teller,]` at fitGAM.R:262).
-            if offset_arr.ndim == 1:
-                gene_offset = offset_arr
-            else:
-                gene_offset = offset_arr[int(g_global), :]
-
-            # R wraps each mgcv::gam(...) call in try(withCallingHandlers(...))
-            # at fitGAM.R:297-340: failed fits become try-error and AIC = NA.
-            # Mirror that here so a single ill-conditioned gene does not abort
-            # the diagnostic for the rest. Capture warnings too (R's
-            # withCallingHandlers warning branch sets converged=FALSE but the
-            # AIC entry is still recorded; we keep that recording semantic).
-            try:
-                with warnings.catch_warnings(record=True):
-                    warnings.simplefilter("always")
-                    fit = fit_nb_gam_block(
-                        y=y,
-                        X=X,
-                        S=S,
-                        offset=gene_offset,
-                        weights=w_obs,
-                        family=family,
-                    )
-            except Exception:
-                return np.nan, np.nan
-
-            # Reconstruct fitted mean and compute mgcv-faithful AIC. R's
-            # ``m$aic`` uses ``edf1 = 2·edf - trace(F·F)`` (Wood §6.11.1), not
-            # the simpler ``+ 2·edf`` form ``GamFit.aic`` carries. We also
-            # re-derive ``edf = trace(F)`` from a pinv-based hat-matrix
-            # reconstruction; ``fit.edf`` from the inner IRLS can be
-            # unreliable when the GCV grid lands on an ill-conditioned λ.
-            eta = X @ fit.beta + gene_offset
-            eta = np.clip(eta, -50.0, 50.0)
-            mu = np.exp(eta)
-            weights_for_aic = (
-                np.ones_like(y, dtype=np.float64) if w_obs is None else w_obs
-            )
-            edf_trace, edf1 = _compute_edf1(
-                fit, X, S, gene_offset, weights_for_aic, family
-            )
-            aic_val = _nb_aic(
-                y, mu, fit.alpha, edf1, weights=w_obs
-            )
-            # Keep the EDF reconstruction explicit: it is required for the AIC
-            # penalty above. The fit kernel's ``gcv`` field carries the
-            # mgcv-compatible NB REML score exposed by R as ``m$gcv.ubre``.
-            _ = edf_trace
-            return aic_val, fit.gcv
-
-        gene_items = list(enumerate(gene_sub))
-        if parallel:
-            fit_values = Parallel(n_jobs=n_jobs)(
-                delayed(_fit_one_gene_for_k)(g_local, int(g_global))
-                for g_local, g_global in gene_items
-            )
-        else:
-            iterable = gene_items
-            if verbose:
-                iterable = tqdm(
-                    gene_items,
-                    total=len(gene_items),
-                    desc=f"evaluate_k k={kk}",
-                )
-            fit_values = [
-                _fit_one_gene_for_k(g_local, int(g_global))
-                for g_local, g_global in iterable
-            ]
-
-        for g_local, (aic_val, gcv_val) in enumerate(fit_values):
-            aic_mat[g_local, kk_idx] = aic_val
-            gcv_mat[g_local, kk_idx] = gcv_val
-
-    row_index = pd.Index(
-        adata.var_names[np.asarray(gene_sub, dtype=np.int64)],
-        name=None,
+    Set ``warm_start_lam=False`` to compare the optimized score extraction
+    against the legacy :func:`evaluate_k` path without changing λ-grid
+    initialization.
+    """
+    return _evaluate_k_core(
+        adata,
+        layer=layer,
+        pseudotime_key=pseudotime_key,
+        weights_key=weights_key,
+        k_range=k_range,
+        n_genes=n_genes,
+        plot=plot,
+        aic_diff=aic_diff,
+        random_state=random_state,
+        verbose=verbose,
+        parallel=parallel,
+        n_jobs=n_jobs,
+        U=U,
+        sample_weights=sample_weights,
+        offset=offset,
+        family=family,
+        gcv=gcv,
+        conditions=conditions,
+        _w_samp=_w_samp,
+        score_mode="direct",
+        progress_name="evaluate_k2",
+        n_lam=n_lam,
+        log_lam_range=log_lam_range,
+        warm_start_lam=warm_start_lam,
+        backend=backend,
+        batch_size=batch_size,
     )
-    cols = [f"k: {k}" for k in k_list]
-    aic_df = pd.DataFrame(aic_mat, index=row_index, columns=cols)
-    gcv_df = pd.DataFrame(gcv_mat, index=row_index, columns=cols)
-
-    if plot:
-        fig = plot_evaluatek_results(aic_df, k_range=k_list, aic_diff=aic_diff)
-        aic_df.attrs["plot"] = fig
-        try:
-            from IPython.display import display
-        except ImportError:
-            pass
-        else:
-            display(fig)
-
-    if gcv:
-        if plot:
-            gcv_df.attrs["plot"] = aic_df.attrs["plot"]
-        return {"aic": aic_df, "gcv": gcv_df}
-    return aic_df
 
 
 def plot_evaluatek_results(

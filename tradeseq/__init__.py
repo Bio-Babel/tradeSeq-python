@@ -16,7 +16,7 @@ from .cluster import cluster_expression_patterns
 from .condition_test import condition_test
 from .datasets import load_paul15
 from .diff_end_test import diff_end_test
-from .evaluate_k import evaluate_k, plot_evaluatek_results
+from .evaluate_k import evaluate_k, evaluate_k2, plot_evaluatek_results
 from .fit_gam import FittedGam, fit_gam, nknots
 from .get_smoother import get_smoother_pvalues, get_smoother_test_stats
 from .pattern_test import early_de_test, pattern_test
@@ -33,6 +33,7 @@ __all__ = [
     "FittedGam",
     "CascadeResult",
     "evaluate_k",
+    "evaluate_k2",
     "plot_evaluatek_results",
     "association_test",
     "start_vs_end_test",

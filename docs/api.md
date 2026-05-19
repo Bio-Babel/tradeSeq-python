@@ -14,6 +14,9 @@ documented on the [Home](index.md) page.
 
 ## Diagnostic
 
+Includes the R-faithful `evaluate_k`, the optimized `evaluate_k2`, and
+`plot_evaluatek_results`.
+
 ::: tradeseq.evaluate_k
 
 ## Wald tests

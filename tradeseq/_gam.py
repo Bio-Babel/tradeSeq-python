@@ -376,6 +376,7 @@ def fit_nb_gam_block(
     tol: float = 1e-5,
     initial_alpha: float = 1.0,
     family: str = "nb",
+    warm_start_lam: bool = False,
 ) -> GamFit:
     """Fit a penalized NB-GAM with mgcv-style smoothness selection and α-loop.
 
@@ -406,6 +407,12 @@ def fit_nb_gam_block(
         ``"nb"`` (default) iterates α and selects λ by the REML score used by
         mgcv's extended-family NB path. ``"gaussian"`` is a single penalized
         fit with ``alpha = 0`` and literal GCV selection.
+    warm_start_lam : bool, default False
+        Reuse each λ-grid fit as the initial coefficient vector for the next
+        λ value within the same outer α iteration. The default is ``False`` to
+        preserve the historical reference path; callers that need speed can
+        enable this because neighbouring λ values have smoothly varying
+        penalized-IRLS solutions.
 
     Returns
     -------
@@ -452,11 +459,14 @@ def fit_nb_gam_block(
         best_dev_this = np.inf
         best_lam_this = best_lam
         best_edf_this = best_edf
+        beta_init_lam = beta
         for log_lam in log_lams:
             lam = float(np.exp(log_lam))
             b_lam, dev_lam, edf_lam, _aic_lam = _irls_with_offset(
-                y, X, offset, S, lam, alpha, weights, beta
+                y, X, offset, S, lam, alpha, weights, beta_init_lam
             )
+            if warm_start_lam:
+                beta_init_lam = b_lam
             if family == "nb":
                 mu_lam = _safe_exp(X @ b_lam + offset)
                 w_lam = weights * mu_lam / (1.0 + alpha * mu_lam)

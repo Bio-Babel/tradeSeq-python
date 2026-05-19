@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 import tradeseq
-from tradeseq.evaluate_k import evaluate_k, plot_evaluatek_results
+from tradeseq.evaluate_k import evaluate_k, evaluate_k2
 
 
 def _silence_offset_warning():
@@ -304,6 +304,164 @@ def test_evaluate_k_gcv_default_is_false(paul15_fast_adata):
         random_state=7,
     )
     assert isinstance(out, pd.DataFrame)
+
+
+def test_evaluate_k2_exported():
+    assert tradeseq.evaluate_k2 is evaluate_k2
+
+
+def test_evaluate_k2_cold_start_matches_evaluate_k(paul15_fast_adata, monkeypatch):
+    """With lambda warm starts disabled, evaluate_k2 should be a score-extraction
+    optimization of evaluate_k, not a different statistical path."""
+    _silence_offset_warning()
+    kwargs = dict(
+        k_range=range(3, 5),
+        n_genes=3,
+        plot=False,
+        random_state=17,
+        verbose=False,
+    )
+    legacy = evaluate_k(paul15_fast_adata, **kwargs)
+
+    import sys
+
+    evk_mod = sys.modules["tradeseq.evaluate_k"]
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("evaluate_k2 should use GamFit.aic directly")
+
+    monkeypatch.setattr(evk_mod, "_compute_edf1", fail_if_called)
+    optimized = evaluate_k2(
+        paul15_fast_adata,
+        **kwargs,
+        warm_start_lam=False,
+    )
+    pd.testing.assert_frame_equal(
+        optimized,
+        legacy,
+        check_exact=False,
+        rtol=1e-8,
+        atol=1e-6,
+    )
+
+
+def test_evaluate_k2_warm_start_stays_close_to_cold_start(paul15_fast_adata):
+    _silence_offset_warning()
+    kwargs = dict(
+        k_range=range(3, 5),
+        n_genes=3,
+        plot=False,
+        random_state=17,
+        verbose=False,
+    )
+    cold = evaluate_k2(paul15_fast_adata, **kwargs, warm_start_lam=False)
+    warm = evaluate_k2(paul15_fast_adata, **kwargs)
+    pd.testing.assert_index_equal(warm.index, cold.index)
+    pd.testing.assert_index_equal(warm.columns, cold.columns)
+    assert np.isfinite(warm.values).all()
+    np.testing.assert_allclose(warm.values, cold.values, rtol=1e-4, atol=1e-4)
+
+
+def test_evaluate_k2_thread_parallel_matches_serial(paul15_fast_adata):
+    _silence_offset_warning()
+    kwargs = dict(
+        k_range=range(3, 5),
+        n_genes=3,
+        plot=False,
+        random_state=17,
+        verbose=False,
+    )
+    serial = evaluate_k2(paul15_fast_adata, **kwargs)
+    parallel = evaluate_k2(
+        paul15_fast_adata,
+        **kwargs,
+        parallel=True,
+        n_jobs=2,
+        backend="threads",
+    )
+    pd.testing.assert_frame_equal(parallel, serial)
+
+
+def test_evaluate_k2_gcv_returns_dict(paul15_fast_adata):
+    _silence_offset_warning()
+    out = evaluate_k2(
+        paul15_fast_adata,
+        k_range=range(3, 5),
+        n_genes=3,
+        plot=False,
+        random_state=17,
+        verbose=False,
+        gcv=True,
+    )
+    assert isinstance(out, dict)
+    assert set(out.keys()) == {"aic", "gcv"}
+    assert out["aic"].shape == (3, 2)
+    assert out["gcv"].shape == (3, 2)
+    assert np.isfinite(out["aic"].values).all()
+    assert np.isfinite(out["gcv"].values).all()
+
+
+def test_evaluate_k2_rejects_invalid_backend(paul15_fast_adata):
+    _silence_offset_warning()
+    with pytest.raises(ValueError, match="backend"):
+        evaluate_k2(
+            paul15_fast_adata,
+            k_range=range(3, 5),
+            n_genes=2,
+            plot=False,
+            backend="loky",  # type: ignore[arg-type]
+        )
+
+
+def test_evaluate_k2_rejects_invalid_lambda_grid(paul15_fast_adata):
+    _silence_offset_warning()
+    with pytest.raises(ValueError, match="n_lam"):
+        evaluate_k2(
+            paul15_fast_adata,
+            k_range=range(3, 5),
+            n_genes=2,
+            plot=False,
+            n_lam=1,
+        )
+    with pytest.raises(ValueError, match="strictly increasing"):
+        evaluate_k2(
+            paul15_fast_adata,
+            k_range=range(3, 5),
+            n_genes=2,
+            plot=False,
+            log_lam_range=(2.0, 2.0),
+        )
+
+
+def test_evaluate_k2_failed_fit_becomes_nan(paul15_fast_adata):
+    _silence_offset_warning()
+    import sys
+
+    evk_mod = sys.modules["tradeseq.evaluate_k"]
+    orig_fit = evk_mod.fit_nb_gam_block
+    call_count = {"n": 0}
+
+    def patched(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("Simulated mgcv failure")
+        return orig_fit(*args, **kwargs)
+
+    evk_mod.fit_nb_gam_block = patched
+    try:
+        mat = evaluate_k2(
+            paul15_fast_adata,
+            k_range=range(3, 5),
+            n_genes=paul15_fast_adata.n_vars,
+            plot=False,
+            random_state=7,
+            verbose=False,
+        )
+    finally:
+        evk_mod.fit_nb_gam_block = orig_fit
+    assert np.isnan(mat.values[0, 0])
+    finite_mask = ~np.isnan(mat.values)
+    assert np.isfinite(mat.values[finite_mask]).all()
 
 
 def test_evaluate_k_conditions_uses_conditions_design(paul15_fast_adata):
