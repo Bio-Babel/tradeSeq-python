@@ -1,15 +1,17 @@
 """tradeSeq-python — trajectory-based differential expression analysis (NB-GAM).
 
-Python port of the R/Bioconductor package tradeSeq (1.13.12). The container is
-:class:`anndata.AnnData`; see :doc:`docs/index.md` for the slot schema.
+Python port of the R/Bioconductor package tradeSeq 1.13.12 at upstream commit
+02a9050. The container is :class:`anndata.AnnData`; see :doc:`docs/index.md`
+for the slot schema.
 """
 
 from __future__ import annotations
 
-__version__ = "1.13.12+0"
+__version__ = "1.13.12"
+__r_commit__ = "02a9050"
 
 from .association_test import association_test
-from .cascade import cascade
+from .cascade import CascadeResult, cascade, plot_cascade
 from .cluster import cluster_expression_patterns
 from .condition_test import condition_test
 from .datasets import load_paul15
@@ -29,6 +31,7 @@ __all__ = [
     "fit_gam",
     "nknots",
     "FittedGam",
+    "CascadeResult",
     "evaluate_k",
     "plot_evaluatek_results",
     "association_test",
@@ -43,6 +46,7 @@ __all__ = [
     "get_smoother_test_stats",
     "plot_smoothers",
     "plot_gene_count",
+    "plot_cascade",
     "cluster_expression_patterns",
     "cascade",
 ]

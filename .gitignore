@@ -29,4 +29,7 @@ Thumbs.db
 site/
 .cache/
 .ipynb_checkpoints/
-validation/
+
+# Validation outputs are generated, except source-controlled R reference
+# fixtures that pytest consumes directly.
+validation/*

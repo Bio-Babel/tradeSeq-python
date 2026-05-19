@@ -67,7 +67,8 @@ argument of `fit_gam` for parallel-fit workflows.
 
 ## API surface
 
-17 working exports plus 1 stub:
+18 R-mapped working exports, plus Python-only `load_paul15` and
+`plot_cascade` helpers:
 
 | Tier | Exports |
 |---|---|
@@ -76,9 +77,9 @@ argument of `fit_gam` for parallel-fit workflows.
 | T2 Wald battery | `association_test`, `start_vs_end_test`, `diff_end_test`, `pattern_test`, `early_de_test`, `condition_test` |
 | T3 prediction | `predict_cells`, `predict_smooth` |
 | T4 plotting | `plot_smoothers`, `plot_gene_count` |
-| T5 downstream | `cluster_expression_patterns` |
+| T5 downstream | `cluster_expression_patterns`, `cascade`, `plot_cascade` |
 | T6 list-mode | `get_smoother_pvalues`, `get_smoother_test_stats` |
-| Stub | `cascade` (deferred to v2 — raises `NotImplementedError`) |
+| Python containers | `FittedGam`, `CascadeResult` |
 
 See [API Reference](api.md) for full signatures and docstrings.
 
@@ -93,7 +94,7 @@ See [API Reference](api.md) for full signatures and docstrings.
   mgcv-1.9.3's `src/mgcv.c:crspl` — bit-exact to within 1e-10.
 - TMM normalisation (`edgeR::calcNormFactors`) is reimplemented in NumPy.
 - Visualisation uses the Bio-Babel ecosystem (`ggplot2_py`, `patchwork`,
-  `scales`, `grid_py`, `gtable_py`) — no matplotlib.
+  `pheatmap`, `scales`, `grid_py`, `gtable_py`) — no matplotlib.
 - `cluster_expression_patterns` swaps `clusterExperiment::RSEC` for
   `sklearn.cluster.AgglomerativeClustering` (documented Tier-3 deviation).
 

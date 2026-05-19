@@ -29,6 +29,8 @@ def test_plot_returns_patchwork(synthetic_aic_mat):
         synthetic_aic_mat, k_range=range(3, 9), aic_diff=2.0
     )
     assert isinstance(fig, patchwork.Patchwork)
+    assert fig.fig_width == 12.0
+    assert fig.fig_height == 3.0
 
 
 def test_plot_accepts_list_k_range(synthetic_aic_mat):
@@ -36,6 +38,20 @@ def test_plot_accepts_list_k_range(synthetic_aic_mat):
         synthetic_aic_mat, k_range=[3, 4, 5, 6, 7, 8], aic_diff=2.0
     )
     assert isinstance(fig, patchwork.Patchwork)
+
+
+def test_plot_accepts_display_size_override(synthetic_aic_mat):
+    fig = plot_evaluatek_results(
+        synthetic_aic_mat,
+        k_range=range(3, 9),
+        aic_diff=2.0,
+        fig_width=10,
+        fig_height=2.5,
+        fig_dpi=120,
+    )
+    assert fig.fig_width == 10.0
+    assert fig.fig_height == 2.5
+    assert fig.fig_dpi == 120
 
 
 def test_plot_accepts_numpy_k_range(synthetic_aic_mat):

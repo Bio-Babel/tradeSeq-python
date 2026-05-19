@@ -54,12 +54,10 @@ documented on the [Home](index.md) page.
 ### `cluster_expression_patterns`
 ::: tradeseq.cluster
 
+### `cascade` / `plot_cascade`
+::: tradeseq.cascade
+
 ## List-mode accessors
 
 ### `get_smoother_pvalues` / `get_smoother_test_stats`
 ::: tradeseq.get_smoother
-
-## Deferred (v2)
-
-### `cascade`
-::: tradeseq.cascade

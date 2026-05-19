@@ -4,9 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tradeSeq-python"
-version = "1.13.12+0"
-description = "Python port of the R tradeSeq package — trajectory-based differential expression analysis (NB-GAM)"
+version = "1.13.12"
+description = "Python port of the R tradeSeq package (tracks statOmics/tradeSeq 1.13.12 @ 02a9050) — trajectory-based differential expression analysis (NB-GAM)"
 license = "MIT"
+readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "tradeSeq port"}]
 dependencies = [
@@ -20,6 +21,7 @@ dependencies = [
     "tqdm>=4.0",
     "ggplot2-python>=4",
     "patchwork-python>=1.3",
+    "pheatmap-python>=1.0",
     "scales-python>=1.4",
     "rgrid-python>=4.5",
     "gtable-python>=0.3",
@@ -33,19 +35,18 @@ docs = ["mkdocs", "mkdocstrings[python]", "mkdocs-material", "mkdocs-jupyter"]
 packages = ["tradeseq"]
 include = [
   "tradeseq/resources/*.h5ad",
-  "tutorials/*.ipynb",
+  "tradeseq/py.typed",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
   "tradeseq/**",
-  "tutorials/**",
-  "docs/**",
-  "tests/**",
   "README.md",
   "LICENSE",
   "pyproject.toml",
-  "mkdocs.yml",
+]
+exclude = [
+  "tradeseq/.ipynb_checkpoints/**",
 ]
 
 [tool.pytest.ini_options]

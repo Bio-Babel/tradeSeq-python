@@ -531,6 +531,9 @@ def plot_evaluatek_results(
     *,
     k_range: Optional[Iterable[int]] = None,
     aic_diff: float = 2.0,
+    fig_width: float | None = 12.0,
+    fig_height: float | None = 3.0,
+    fig_dpi: int | None = None,
 ) -> patchwork.Patchwork:
     """Render the 4-panel ``evaluateK`` diagnostic.
 
@@ -566,6 +569,12 @@ def plot_evaluatek_results(
     aic_diff : float, default 2.0
         Minimum AIC range a gene must have to enter panel 4. Mirrors R
         ``aicDiff = 2``.
+    fig_width, fig_height, fig_dpi : optional
+        Notebook display hints on the returned patchwork object. The R source
+        draws the four panels as ``par(mfrow = c(1, 4))``; the defaults
+        therefore use a wide, low canvas instead of patchwork-python's generic
+        square-ish display size. Saving via ``ggsave`` can still override size
+        explicitly.
 
     Returns
     -------
@@ -677,4 +686,10 @@ def plot_evaluatek_results(
     )
 
     fig = patchwork.wrap_plots([p1, p2, p3, p4], nrow=1)
+    if fig_width is not None:
+        fig.fig_width = float(fig_width)
+    if fig_height is not None:
+        fig.fig_height = float(fig_height)
+    if fig_dpi is not None:
+        fig.fig_dpi = int(fig_dpi)
     return fig
