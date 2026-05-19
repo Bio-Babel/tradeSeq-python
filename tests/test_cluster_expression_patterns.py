@@ -70,7 +70,7 @@ def fitted_paul15_cluster(paul15_adata):
 
 @pytest.fixture(scope="module")
 def fitted_paul15_cluster_list(paul15_adata):
-    """List-mode fit_gam(sce=False) over the same 10-gene panel.
+    """List-mode fit_gam(return_models=True) over the same 10-gene panel.
 
     Used to exercise the list-mode branch
     (clusterExpressionPatterns.R:225-251).
@@ -83,7 +83,7 @@ def fitted_paul15_cluster_list(paul15_adata):
         w_samp[i] = rng.multinomial(1, probs[i])
     keep = [g for g in GENES if g in a.var_names]
     fits = tradeseq.fit_gam(
-        a, genes=keep, n_knots=6, verbose=False, _w_samp=w_samp, sce=False,
+        a, genes=keep, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True,
     )
     return fits, keep
 

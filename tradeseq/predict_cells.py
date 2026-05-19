@@ -6,7 +6,8 @@ Port of the two ``setMethod`` dispatchers for ``predictCells``:
   and ``beta`` from the AnnData container previously populated by
   :func:`tradeseq.fit_gam` and returns ``exp(X @ beta.T + offset)``.
 * List dispatcher (``predictCells.R:47-63``): unpacks the ``fitted.values``
-  field per gene from a ``dict[str, FittedGam]`` produced by ``fit_gam(sce=False)``.
+  field per gene from a ``dict[str, FittedGam]`` produced by
+  ``fit_gam(return_models=True)``.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from ._slot_io import read_beta, read_design_matrix, read_lpmatrix
 __all__ = ["predict_cells"]
 
 
-def _resolve_gene_ids_sce(
+def _resolve_gene_ids_adata(
     adata: ad.AnnData, gene: Union[str, int, Sequence[Union[str, int]]]
 ) -> tuple[np.ndarray, list]:
     """Return ``(id, gene_list)`` where ``id`` is the integer row index in adata.
@@ -76,7 +77,7 @@ def _resolve_offset_column(dm: pd.DataFrame) -> str:
     )
 
 
-def _predict_cells_sce(
+def _predict_cells_adata(
     adata: ad.AnnData,
     gene: Union[str, int, Sequence[Union[str, int]]],
     key: str,
@@ -89,7 +90,7 @@ def _predict_cells_sce(
     dm = read_design_matrix(adata, key=key)
     X = read_lpmatrix(adata, key=key)
     beta_full = read_beta(adata, key=key)
-    id_arr, gene_list = _resolve_gene_ids_sce(adata, gene)
+    id_arr, gene_list = _resolve_gene_ids_adata(adata, gene)
     beta = beta_full[id_arr, :]
     # R: exp(t(X %*% t(beta)) + matrix(dm$offset, nrow=length(gene), ncol=nrow(X), byrow=TRUE))
     # X is (n_cells, p); beta is (n_genes, p); X @ beta.T is (n_cells, n_genes);
@@ -158,7 +159,7 @@ def predict_cells(
     * ``adata`` is an :class:`anndata.AnnData` produced by
       :func:`tradeseq.fit_gam` — returns ``exp(X @ beta.T + offset)``.
     * ``adata`` is a ``dict[str, FittedGam]`` produced by
-      ``tradeseq.fit_gam(sce=False)`` — returns the per-gene
+      ``tradeseq.fit_gam(return_models=True)`` — returns the per-gene
       ``exp(X @ coef_ + offset)`` rows (R's ``fitted.values``).
 
     Parameters
@@ -185,7 +186,7 @@ def predict_cells(
         If ``adata`` is neither an AnnData nor a dict.
     """
     if isinstance(adata, ad.AnnData):
-        return _predict_cells_sce(adata, gene, key=key)
+        return _predict_cells_adata(adata, gene, key=key)
     if isinstance(adata, dict):
         return _predict_cells_list(adata, gene)
     raise TypeError(

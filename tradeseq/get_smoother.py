@@ -7,9 +7,9 @@ R sources:
 * ``tradeSeq/R/getSmootherTestStats.R`` — reads ``summary(m)$s.table[, "Chi.sq"]``
   per gene.
 
-Both functions take the list-mode output of :func:`tradeseq.fit_gam`
-(``sce=False``) — a ``dict[str, FittedGam]`` — and concatenate the per-gene
-summary tables into a single ``(n_genes, n_smoothers)`` matrix.
+Both functions take the fitted-model output of :func:`tradeseq.fit_gam`
+(``return_models=True``) — a ``dict[str, FittedGam]`` — and concatenate the
+per-gene summary tables into a single ``(n_genes, n_smoothers)`` matrix.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ __all__ = ["get_smoother_pvalues", "get_smoother_test_stats"]
 
 _LIST_ONLY_MESSAGE = (
     "{name} only operates on a dict[str, FittedGam] (the list-mode output of "
-    "fit_gam). Call fit_gam(adata, ..., sce=False) to obtain that dict, then "
-    "pass it here."
+    "fit_gam). Call fit_gam(adata, ..., return_models=True) to obtain that "
+    "dict, then pass it here."
 )
 
 
@@ -106,7 +106,8 @@ def get_smoother_pvalues(
     Parameters
     ----------
     models : dict[str, FittedGam]
-        List-mode output of :func:`tradeseq.fit_gam` with ``sce=False``.
+        Fitted-model output of :func:`tradeseq.fit_gam` with
+        ``return_models=True``.
 
     Returns
     -------
@@ -137,7 +138,8 @@ def get_smoother_test_stats(
     Parameters
     ----------
     models : dict[str, FittedGam]
-        List-mode output of :func:`tradeseq.fit_gam` with ``sce=False``.
+        Fitted-model output of :func:`tradeseq.fit_gam` with
+        ``return_models=True``.
 
     Returns
     -------

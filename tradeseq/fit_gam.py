@@ -31,7 +31,7 @@ _MGCV_TESTSTAT_EIG_TOL = np.finfo(float).eps ** 0.9
 
 @dataclass
 class FittedGam:
-    """Thin per-gene container returned in list-mode (``sce=False``).
+    """Thin per-gene container returned when ``return_models=True``.
 
     Mirrors only the mgcv ``gam`` attributes that the tradeSeq exports
     actually consume — see
@@ -364,19 +364,19 @@ def fit_gam(
     parallel: bool = False,
     n_jobs: int = 1,
     verbose: bool = True,
-    sce: bool = True,
+    return_models: bool = False,
     aic: bool = False,
     gcv: bool = False,
     key_added: str = "tradeseq",
     copy: bool = False,
     _w_samp: Optional[np.ndarray] = None,
-) -> Optional[ad.AnnData] | dict[str, FittedGam] | np.ndarray | tuple[np.ndarray, np.ndarray]:
+) -> Optional[ad.AnnData] | dict[str, Optional[FittedGam]] | np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Fit a negative-binomial GAM to every gene along each trajectory lineage.
 
     Python port of ``tradeSeq::fitGAM`` (R source: ``tradeSeq/R/fitGAM.R:183-310``
     and the three ``setMethod`` dispatchers at lines 488-744). The container
-    is AnnData; the equivalents of R's ``rowData(sce)$tradeSeq$*``,
-    ``colData(sce)$tradeSeq$*``, ``metadata(sce)$tradeSeq$*`` slots are
+    is AnnData; the equivalents of R's ``rowData`` / ``colData`` /
+    ``metadata`` tradeSeq slots are
     populated under ``adata.varm/var/uns[key_added]``.
 
     Parameters
@@ -416,10 +416,10 @@ def fit_gam(
         Number of joblib workers when ``parallel=True``.
     verbose : bool, default True
         Show a tqdm progress bar over genes.
-    sce : bool, default True
-        If True, mutate ``adata`` in place (or return a copy when
-        ``copy=True``). If False, return a ``dict[gene, FittedGam]`` for the
-        list-mode contract used by :func:`get_smoother_pvalues` and
+    return_models : bool, default False
+        If False, mutate ``adata`` in place (or return a copy when
+        ``copy=True``). If True, return a ``dict[gene, FittedGam]`` for the
+        per-gene model contract used by :func:`get_smoother_pvalues` and
         :func:`get_smoother_test_stats`.
     aic : bool, default False
         Return a per-gene AIC vector (R: ``fitGAM.R:332-340``) and skip the
@@ -433,7 +433,7 @@ def fit_gam(
     key_added : str, default "tradeseq"
         Namespace prefix in ``adata.uns`` / ``adata.varm`` / ``adata.var``.
     copy : bool, default False
-        If True and ``sce=True``, mutate a copy and return it.
+        If True and ``return_models=False``, mutate a copy and return it.
     _w_samp : numpy.ndarray, optional
         Private validation kwarg — pre-computed multinomial assignment matrix
         for cross-language seed parity. See :func:`assign_cells`.
@@ -443,15 +443,16 @@ def fit_gam(
     anndata.AnnData or None or dict[str, FittedGam] or numpy.ndarray or tuple
         * ``aic=True, gcv=False``: ``np.ndarray`` of shape ``(n_genes,)``.
         * ``aic=True, gcv=True``: ``(aic_array, gcv_array)`` tuple.
-        * ``sce=True, copy=True``: mutated AnnData copy.
-        * ``sce=True, copy=False``: ``None`` (in-place).
-        * ``sce=False``: ``dict[str, Optional[FittedGam]]`` (failed fits are
+        * ``return_models=False, copy=True``: mutated AnnData copy.
+        * ``return_models=False, copy=False``: ``None`` (in-place).
+        * ``return_models=True``: ``dict[str, Optional[FittedGam]]`` (failed fits are
           recorded as ``None`` so all requested genes appear as keys).
     """
-    if conditions_key is not None and not sce:
+    if conditions_key is not None and return_models:
         warnings.warn(
             "If conditions are provided, AnnData output is usually preferable; "
-            "list-mode is still returned because sce=False was requested.",
+            "a fitted-model dict is still returned because return_models=True "
+            "was requested.",
             stacklevel=2,
         )
 
@@ -550,7 +551,7 @@ def fit_gam(
     for i, (fit, ok) in enumerate(results):
         if fit is None:
             sigma_list.append(np.full((n_coefs, n_coefs), np.nan))
-            if not sce:
+            if return_models:
                 # R: ``rep(NA, nCurves)`` rows for try-error genes. Mirror by
                 # inserting a None placeholder so downstream consumers see a
                 # full keyset (`get_smoother._stack_summary_column` handles
@@ -560,7 +561,7 @@ def fit_gam(
         beta[i, :] = fit.beta
         sigma_list.append(fit.Vp)
         converged[i] = bool(ok)
-        if not sce:
+        if return_models:
             stab = _per_smoother_wald(
                 beta=fit.beta,
                 Vp=fit.Vp,
@@ -579,7 +580,7 @@ def fit_gam(
                 converged_=bool(ok),
             )
 
-    if not sce:
+    if return_models:
         return fits
 
     target = adata.copy() if copy else adata

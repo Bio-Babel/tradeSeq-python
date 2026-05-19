@@ -237,7 +237,7 @@ def test_predict_smooth_tier2_pearson(fitted_paul15, r_predict_smooth_wide_ref):
 
 @pytest.fixture(scope="module")
 def fitted_paul15_list(paul15_small_adata):
-    """List-mode fit_gam(sce=False) → dict[str, FittedGam]."""
+    """List-mode fit_gam(return_models=True) → dict[str, FittedGam]."""
     a = paul15_small_adata.copy()
     rng = np.random.default_rng(7)
     w_samp = np.zeros_like(a.obsm["cell_weights"], dtype=np.int64)
@@ -245,7 +245,7 @@ def fitted_paul15_list(paul15_small_adata):
     for i in range(a.n_obs):
         w_samp[i] = rng.multinomial(1, probs[i])
     fits = tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False,
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True,
     )
     return fits
 

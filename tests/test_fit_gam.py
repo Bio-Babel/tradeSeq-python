@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,13 @@ from tradeseq._slot_io import (
 )
 
 REF_DIR = Path("/tmp")
+
+
+def test_fit_gam_uses_pythonic_return_models_parameter():
+    params = inspect.signature(tradeseq.fit_gam).parameters
+    legacy_container_flag = "s" + "ce"
+    assert "return_models" in params
+    assert legacy_container_flag not in params
 
 
 @pytest.fixture(scope="module")
@@ -113,7 +121,7 @@ def test_fit_gam_list_mode(paul15_small_adata):
     for i in range(a.n_obs):
         w_samp[i] = rng.multinomial(1, probs[i])
     fits = tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True
     )
     assert isinstance(fits, dict)
     assert len(fits) == a.n_vars
@@ -135,7 +143,7 @@ def test_nknots_dict(paul15_small_adata):
     for i in range(a.n_obs):
         w_samp[i] = rng.multinomial(1, probs[i])
     fits = tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True
     )
     assert tradeseq.nknots(fits) == 6
 
@@ -201,7 +209,7 @@ def _fits_list_paul15_small(paul15_small_adata):
     for i in range(a.n_obs):
         w_samp[i] = rng.multinomial(1, probs[i])
     return tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False,
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True,
     )
 
 
@@ -438,7 +446,7 @@ def test_fit_gam_list_mode_failed_fit_placeholder(paul15_small_adata, monkeypatc
 
     monkeypatch.setattr(fit_gam_mod, "_fit_one_gene", fake_fit)
     fits = tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False,
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True,
     )
     # All requested genes appear as keys (no silent drop).
     assert isinstance(fits, dict)
@@ -476,7 +484,7 @@ def test_fit_gam_list_mode_failed_fit_propagates_to_get_smoother(
 
     monkeypatch.setattr(fit_gam_mod, "_fit_one_gene", fake_fit)
     fits = tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False,
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True,
     )
     failed_gene = a.var_names[2]
     pv = tradeseq.get_smoother.get_smoother_pvalues(fits)

@@ -185,7 +185,7 @@ def _resolve_gene_ids_list(
     return selected, list(selected)
 
 
-def _build_yhat_matrix_sce_no_cond(
+def _build_yhat_matrix_adata_no_cond(
     adata: ad.AnnData,
     gene_indices: Sequence[int],
     n_points: int,
@@ -226,7 +226,7 @@ def _build_yhat_matrix_sce_no_cond(
     return yhat, col_labels
 
 
-def _build_yhat_matrix_sce_conditions(
+def _build_yhat_matrix_adata_conditions(
     adata: ad.AnnData,
     gene_indices: Sequence[int],
     n_points: int,
@@ -423,9 +423,9 @@ def cluster_expression_patterns(
     ----------
     models : anndata.AnnData or dict[str, FittedGam]
         AnnData populated by :func:`tradeseq.fit_gam` or the list-mode dict
-        from ``fit_gam(sce=False)``. Both branches dispatch on
-        ``isinstance(models, dict)`` while mirroring R's list and
-        SingleCellExperiment methods (clusterExpressionPatterns.R:181-251).
+        from ``fit_gam(return_models=True)``. Both branches dispatch on
+        ``isinstance(models, dict)`` while mirroring R's list and fitted-container
+        methods (clusterExpressionPatterns.R:181-251).
     n_points : int
         Number of evaluation points per lineage on the prediction grid.
         Mirrors R's ``nPoints``.
@@ -480,11 +480,11 @@ def cluster_expression_patterns(
             )
         conditions = read_conditions(models, key=key)
         if conditions is None:
-            yhat, col_labels = _build_yhat_matrix_sce_no_cond(
+            yhat, col_labels = _build_yhat_matrix_adata_no_cond(
                 models, gene_indices, n_points, key
             )
         else:
-            yhat, col_labels = _build_yhat_matrix_sce_conditions(
+            yhat, col_labels = _build_yhat_matrix_adata_conditions(
                 models, gene_indices, n_points, key
             )
     elif isinstance(models, dict):

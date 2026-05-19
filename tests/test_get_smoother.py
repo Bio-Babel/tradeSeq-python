@@ -10,7 +10,7 @@ We test:
 
 * Structural Tier-1 (shape, column names, index ordering).
 * That AnnData input is rejected with a ``TypeError`` pointing to
-  ``fit_gam(sce=False)``.
+  ``fit_gam(return_models=True)``.
 * That a faulted gene (``FittedGam.converged_ == False``) yields a row of
   NaNs (R: ``rep(NA, nCurves)``).
 * Pearson-r relaxation on the Python output is not asserted against R's
@@ -48,7 +48,7 @@ def _ref_required():
 
 @pytest.fixture(scope="module")
 def fitted_paul15_list(paul15_small_adata):
-    """List-mode fit_gam(sce=False) → dict[str, FittedGam]."""
+    """List-mode fit_gam(return_models=True) → dict[str, FittedGam]."""
     a = paul15_small_adata.copy()
     rng = np.random.default_rng(7)
     w_samp = np.zeros_like(a.obsm["cell_weights"], dtype=np.int64)
@@ -56,7 +56,7 @@ def fitted_paul15_list(paul15_small_adata):
     for i in range(a.n_obs):
         w_samp[i] = rng.multinomial(1, probs[i])
     fits = tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False,
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True,
     )
     return fits
 
@@ -140,13 +140,13 @@ def test_get_smoother_test_stats_values_non_negative(fitted_paul15_list):
 
 
 def test_get_smoother_pvalues_anndata_raises(paul15_small_adata):
-    """AnnData input rejected with TypeError pointing to fit_gam(sce=False)."""
+    """AnnData input rejected with TypeError pointing to fit_gam(return_models=True)."""
     with pytest.raises(TypeError, match="dict\\[str, FittedGam\\]"):
         get_smoother_pvalues(paul15_small_adata)
 
 
 def test_get_smoother_test_stats_anndata_raises(paul15_small_adata):
-    """AnnData input rejected with TypeError pointing to fit_gam(sce=False)."""
+    """AnnData input rejected with TypeError pointing to fit_gam(return_models=True)."""
     with pytest.raises(TypeError, match="dict\\[str, FittedGam\\]"):
         get_smoother_test_stats(paul15_small_adata)
 

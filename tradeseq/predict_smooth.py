@@ -5,8 +5,7 @@ Port of the AnnData and list-mode dispatchers plus the two private helpers:
 * ``.predictSmooth`` (predictSmooth.R:5-55): AnnData branch, no conditions.
 * ``.predictSmooth_conditions`` (predictSmooth.R:58-113): AnnData branch, with
   conditions.
-* R's ``SingleCellExperiment`` method (predictSmooth.R:150-198), mapped to
-  AnnData.
+* R's fitted-container method (predictSmooth.R:150-198), mapped to AnnData.
 * ``setMethod("predictSmooth", "list")`` (predictSmooth.R:202-237).
 
 For the AnnData path we read ``dm``, ``X``, ``beta``,
@@ -57,7 +56,7 @@ def _n_curves_from_dm(dm: pd.DataFrame) -> int:
     return sum(1 for c in dm.columns if _TIME_RE.search(c) is not None)
 
 
-def _gene_index_sce(
+def _gene_index_adata(
     adata: ad.AnnData, gene: Union[str, int, Sequence[Union[str, int]]]
 ) -> tuple[np.ndarray, list]:
     """Resolve ``gene`` to ``(id_arr, gene_label_list)`` for the AnnData path.
@@ -217,7 +216,7 @@ def _predict_smooth_with_cond(
     return pd.concat(out_rows, axis=0, ignore_index=True)
 
 
-def _predict_smooth_sce(
+def _predict_smooth_adata(
     adata: ad.AnnData,
     gene: Union[str, int, Sequence[Union[str, int]]],
     n_points: int,
@@ -229,7 +228,7 @@ def _predict_smooth_sce(
     X = lpmatrix_dataframe(adata, key=key)
     beta_full = read_beta(adata, key=key)
     pseudotime = pseudotime_matrix(adata)
-    id_arr, gene_labels = _gene_index_sce(adata, gene)
+    id_arr, gene_labels = _gene_index_adata(adata, gene)
     beta = beta_full[id_arr, :]
     conditions = read_conditions(adata, key=key)
     if conditions is None:
@@ -340,7 +339,7 @@ def predict_smooth(
     ----------
     adata : anndata.AnnData or dict[str, FittedGam]
         AnnData populated by :func:`tradeseq.fit_gam` or the list-mode dict
-        from ``fit_gam(sce=False)``.
+        from ``fit_gam(return_models=True)``.
     gene : str, int, or sequence of either
         Gene identifier(s) to predict.
     n_points : int, default 100
@@ -360,7 +359,9 @@ def predict_smooth(
         otherwise.
     """
     if isinstance(adata, ad.AnnData):
-        return _predict_smooth_sce(adata, gene, n_points=n_points, tidy=tidy, key=key)
+        return _predict_smooth_adata(
+            adata, gene, n_points=n_points, tidy=tidy, key=key
+        )
     if isinstance(adata, dict):
         return _predict_smooth_list(adata, gene, n_points=n_points)
     raise TypeError(

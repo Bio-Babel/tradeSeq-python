@@ -7,7 +7,7 @@ Two tiers:
   ``predictCells`` cell-by-cell with ``atol=1e-10``.
 * **Tier 2.** Re-fit the Paul-2015 fixture with Python's :func:`tradeseq.fit_gam`
   and compare the resulting fitted values to R's reference via Pearson r ≥ 0.95.
-* **List-mode.** Use :func:`tradeseq.fit_gam` with ``sce=False`` and check the
+* **List-mode.** Use :func:`tradeseq.fit_gam` with ``return_models=True`` and check the
   Python list-mode predict_cells output against the gamList R reference where
   feasible (we cannot bit-match because our NB-GAM fit is not mgcv).
 """
@@ -208,7 +208,7 @@ def test_predict_cells_tier2_pearson(fitted_paul15, r_predict_cells_ref):
 
 @pytest.fixture(scope="module")
 def fitted_paul15_list(paul15_small_adata):
-    """List-mode fit_gam(sce=False) → dict[str, FittedGam]."""
+    """List-mode fit_gam(return_models=True) → dict[str, FittedGam]."""
     a = paul15_small_adata.copy()
     rng = np.random.default_rng(7)
     w_samp = np.zeros_like(a.obsm["cell_weights"], dtype=np.int64)
@@ -216,7 +216,7 @@ def fitted_paul15_list(paul15_small_adata):
     for i in range(a.n_obs):
         w_samp[i] = rng.multinomial(1, probs[i])
     fits = tradeseq.fit_gam(
-        a, n_knots=6, verbose=False, _w_samp=w_samp, sce=False,
+        a, n_knots=6, verbose=False, _w_samp=w_samp, return_models=True,
     )
     return fits
 

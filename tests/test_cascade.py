@@ -1,6 +1,6 @@
 """Tests for tradeseq.cascade (R source: tradeSeq/R/cascade.R).
 
-The R implementation contains upstream bugs (notably an unbound ``sce`` symbol
+The R implementation contains upstream bugs (notably an unbound source symbol
 inside the S4 method body), so the R reference fixture is produced by applying
 the minimal source-faithful fixes described in
 ``validation/_dump_cascade_reference.R``. The algorithm itself remains R-gold:
@@ -11,6 +11,7 @@ peak-time ordering, and pheatmap rendering.
 from __future__ import annotations
 
 from pathlib import Path
+import importlib
 
 import anndata as ad
 import numpy as np
@@ -141,7 +142,7 @@ def test_cascade_empty_result_is_valid_compute_output(r_cascade_adata):
 
 
 def test_plot_cascade_returns_pheatmap(r_cascade_result):
-    """plot_cascade renders with pheatmap-python and leaves columns unclustered."""
+    """plot_cascade renders with pheatmap-python and keeps R row/column order."""
     ph = plot_cascade(r_cascade_result)
     assert isinstance(ph, PHeatmap)
     assert ph.gtable is not None
@@ -149,12 +150,89 @@ def test_plot_cascade_returns_pheatmap(r_cascade_result):
     assert ph.tree_row is None
 
 
-def test_plot_cascade_cluster_heatmap(r_cascade_result):
-    """cluster_heatmap=True maps to pheatmap(cluster_rows=True)."""
-    ph = plot_cascade(r_cascade_result, cluster_heatmap=True)
+def test_plot_cascade_adds_informative_annotations(r_cascade_result, monkeypatch):
+    """Python defaults add annotations without dense column labels."""
+    cascade_module = importlib.import_module("tradeseq.cascade")
+    captured = {}
+
+    def fake_pheatmap(mat, **kwargs):
+        captured["mat"] = mat
+        captured.update(kwargs)
+        return PHeatmap(tree_row=None, tree_col=None, kmeans=None, gtable=object())
+
+    monkeypatch.setattr(cascade_module, "pheatmap", fake_pheatmap)
+    ph = plot_cascade(r_cascade_result)
+
     assert isinstance(ph, PHeatmap)
-    assert ph.tree_row is not None
-    assert ph.tree_col is None
+    assert captured["cluster_rows"] is False
+    assert captured["cluster_cols"] is False
+    assert captured["show_rownames"] is True
+    assert captured["show_colnames"] is False
+    assert list(captured["annotation_row"].columns) == ["peak_time"]
+    assert list(captured["annotation_col"].columns) == ["pseudotime"]
+    np.testing.assert_allclose(
+        captured["annotation_col"]["pseudotime"].to_numpy(dtype=float),
+        r_cascade_result.grid["t1"].to_numpy(dtype=float),
+    )
+
+
+def test_plot_cascade_sparse_r_visual_defaults(r_cascade_result, monkeypatch):
+    """R's sparse heatmap visual can be requested with annotation toggles."""
+    cascade_module = importlib.import_module("tradeseq.cascade")
+    captured = {}
+
+    def fake_pheatmap(mat, **kwargs):
+        captured["mat"] = mat
+        captured.update(kwargs)
+        return PHeatmap(tree_row=None, tree_col=None, kmeans=None, gtable=object())
+
+    monkeypatch.setattr(cascade_module, "pheatmap", fake_pheatmap)
+    plot_cascade(
+        r_cascade_result,
+        show_gene_names=False,
+        show_peak_time=False,
+        show_time_points=False,
+    )
+
+    assert captured["show_rownames"] is False
+    assert captured["show_colnames"] is False
+    assert captured["annotation_row"] is None
+    assert captured["annotation_col"] is None
+
+
+def test_plot_cascade_time_annotation_parses_condition_columns(monkeypatch):
+    """Column annotations keep condition labels separate from point ids."""
+    cascade_module = importlib.import_module("tradeseq.cascade")
+    captured = {}
+    result = CascadeResult(
+        peak_time=pd.Series([1.0], index=["g1"], name="peakTime"),
+        yhat=pd.DataFrame(
+            [[1.0, 2.0]],
+            index=["g1"],
+            columns=[
+                "lineage1_conditionA_long_point1",
+                "lineage1_conditionB_point2",
+            ],
+        ),
+        derivatives=pd.DataFrame(),
+        sd_derivatives=pd.DataFrame(),
+        test_statistics=pd.DataFrame(),
+        p_values=pd.DataFrame(),
+        lineage=1,
+        grid=pd.DataFrame({"t1": [0.0, 3.0]}),
+    )
+
+    def fake_pheatmap(mat, **kwargs):
+        captured["mat"] = mat
+        captured.update(kwargs)
+        return PHeatmap(tree_row=None, tree_col=None, kmeans=None, gtable=object())
+
+    monkeypatch.setattr(cascade_module, "pheatmap", fake_pheatmap)
+    plot_cascade(result)
+
+    annotation_col = captured["annotation_col"]
+    assert list(annotation_col["condition"]) == ["A_long", "B"]
+    np.testing.assert_allclose(annotation_col["pseudotime"], [0.0, 3.0])
 
 
 def test_plot_cascade_empty_raises(r_cascade_adata):

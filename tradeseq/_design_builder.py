@@ -42,7 +42,7 @@ class DesignMatrices:
         smoother basis columns (one per (lineage, basis-index) pair).
     dm
         Per-cell long-form design ``y, U, t1..tL, l1..lL, offset(offset)``
-        DataFrame — the slot R stores at ``colData(sce)$tradeSeq$dm``.
+        DataFrame — the payload R stores in its fitted container's ``colData``.
     knots
         Shared knot vector ``(n_knots,)`` used to construct the cr-basis.
     S
@@ -164,8 +164,8 @@ def build_smooth_design(
     # and reorders the offset to sit immediately after the fixed-effect U.
     # Downstream code (e.g. _design._max_time_in_lineage's positional
     # ``lineageIds + off`` indexing into dm) relies on this interleaved
-    # layout — see R reference at fitGAM.R:264-270 and the dump produced by
-    # ``colnames(colData(sce)$tradeSeq$dm)``.
+    # layout — see R reference at fitGAM.R:264-270 and the dumped fitted
+    # container design-matrix column names.
     dm_cols: dict[str, np.ndarray] = {}
     if n_U == 1:
         dm_cols["U"] = U[:, 0]

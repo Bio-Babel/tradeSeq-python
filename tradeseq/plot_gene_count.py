@@ -4,9 +4,9 @@ Renders the reduced-dimension cell embedding coloured by gene expression or
 categorical clusters, overlaid with the principal-curve geometry and (when
 ``fit_gam`` results are available) the knot points along each lineage.
 
-The R source dispatches on three signatures (``SlingshotDataSet``,
-``PseudotimeOrdering``, ``SingleCellExperiment``); the Python public container
-is always ``AnnData``, so this single entrypoint serves all three paths. The
+The R source dispatches on several trajectory-container signatures; the Python
+public container is always ``AnnData``, so this single entrypoint serves all
+paths. The
 principal-curve geometry is read from
 ``adata.uns["slingshot"]["curves"][lineage_id]["s"][ord]``; the per-knot 2D
 coordinates are resolved by nearest-``lambda`` lookup against

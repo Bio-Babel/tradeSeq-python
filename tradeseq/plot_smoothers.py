@@ -4,9 +4,9 @@ Port of the AnnData branch corresponding to ``plotSmoothers``. Renders the per-c
 expression scatter overlaid with the fitted per-lineage smoothers produced by
 :func:`tradeseq.fit_gam`.
 
-The R source dispatches on three signatures (``gam``, ``SingleCellExperiment``,
-and the conditions branch). In Python the container is always ``AnnData`` so
-the single :func:`plot_smoothers` entrypoint covers both the fitted-trajectory and
+The R source dispatches on fitted model, fitted-container, and conditions
+branches. In Python the container is always ``AnnData`` so the single
+:func:`plot_smoothers` entrypoint covers both the fitted-trajectory and
 conditions paths — they are selected automatically by reading
 ``adata.uns[key]["conditions"]``.
 """

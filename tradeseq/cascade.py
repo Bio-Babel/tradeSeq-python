@@ -9,13 +9,14 @@ draws a heatmap of those genes.  The Python port splits that behavior into:
 
 This intentionally fixes the upstream R implementation bugs documented in
 ``tradeseq_porting_essential_suggestions.md``: the R method body references an
-unbound ``sce`` symbol instead of its ``models`` argument, uses an out-of-scope
+unbound source variable instead of its ``models`` argument, uses an out-of-scope
 ``nPoints`` name in the NaN-coefficient branch, and tries to return ``yHat``
 even when ``plotHeatmap=FALSE``.
 """
 
 from __future__ import annotations
 
+import re
 from typing import NamedTuple, Sequence, Union
 
 import anndata as ad
@@ -35,6 +36,10 @@ __all__ = ["CascadeResult", "cascade", "plot_cascade"]
 
 
 _ZISSOU1_5_STOPS = ["#3B9AB2", "#78B7C5", "#EBCC2A", "#E1AF00", "#F21A00"]
+_YHAT_POINT_RE = re.compile(r"^lineage(?P<lineage>\d+)_(?P<point>\d+)$")
+_YHAT_CONDITION_POINT_RE = re.compile(
+    r"^lineage(?P<lineage>\d+)_condition(?P<condition>.+)_point(?P<point>\d+)$"
+)
 
 
 class CascadeResult(NamedTuple):
@@ -319,10 +324,71 @@ def _zissou1_palette(n: int = 12) -> list[str]:
     return list(pal(np.linspace(0.0, 1.0, int(n))))
 
 
+def _merge_annotation(
+    auto: pd.DataFrame | None,
+    user: pd.DataFrame | None,
+) -> pd.DataFrame | None:
+    """Merge auto annotations with user-supplied pheatmap annotations."""
+    if auto is None:
+        return user
+    if user is None:
+        return auto
+    user = pd.DataFrame(user).reindex(auto.index)
+    auto = auto.drop(columns=[c for c in auto.columns if c in user.columns])
+    if auto.shape[1] == 0:
+        return user
+    return pd.concat([auto, user], axis=1)
+
+
+def _cascade_row_annotation(
+    result: CascadeResult, ordered_genes: Sequence[str]
+) -> pd.DataFrame:
+    """Peak pseudotime annotation aligned to plotted gene order."""
+    return pd.DataFrame(
+        {"peak_time": result.peak_time.reindex(ordered_genes).astype(float)},
+        index=pd.Index(ordered_genes),
+    )
+
+
+def _cascade_col_annotation(result: CascadeResult) -> pd.DataFrame:
+    """Pseudotime annotation aligned to plotted yhat columns."""
+    time_col = f"t{result.lineage}"
+    if time_col in result.grid:
+        time_values = result.grid[time_col].to_numpy(dtype=float)
+    else:
+        time_values = np.arange(1, result.yhat.shape[1] + 1, dtype=float)
+
+    records: list[dict[str, object]] = []
+    has_condition = False
+    for pos, col in enumerate(result.yhat.columns):
+        col_str = str(col)
+        match = _YHAT_CONDITION_POINT_RE.match(col_str) or _YHAT_POINT_RE.match(
+            col_str
+        )
+        point = pos + 1
+        condition: str | None = None
+        if match is not None and int(match.group("lineage")) == result.lineage:
+            point = int(match.group("point"))
+            condition = match.groupdict().get("condition")
+        if condition is not None:
+            has_condition = True
+        pseudotime = (
+            time_values[point - 1] if 1 <= point <= len(time_values) else np.nan
+        )
+        records.append({"pseudotime": pseudotime, "condition": condition})
+
+    annotation = pd.DataFrame(records, index=result.yhat.columns)
+    if not has_condition:
+        annotation = annotation.drop(columns=["condition"])
+    return annotation
+
+
 def plot_cascade(
     result: CascadeResult,
     *,
-    cluster_heatmap: bool = False,
+    show_gene_names: bool = True,
+    show_peak_time: bool = True,
+    show_time_points: bool = True,
     color: Sequence[str] | None = None,
     silent: bool = True,
     **kwargs,
@@ -333,8 +399,15 @@ def plot_cascade(
     ----------
     result : CascadeResult
         Output from :func:`cascade`.
-    cluster_heatmap : bool, default False
-        Whether to cluster rows. Columns are never clustered, matching R.
+    show_gene_names : bool, default True
+        Whether to show gene names as row labels. Set ``False`` for the sparse
+        R visual default.
+    show_peak_time : bool, default True
+        Whether to add row annotation with each gene's peak pseudotime. Set
+        ``False`` for the sparse R visual default.
+    show_time_points : bool, default True
+        Whether to add column annotation with pseudotime values. Time is shown
+        as an annotation rather than dense column labels.
     color : sequence of str or None
         Heatmap palette. ``None`` uses the 12-colour continuous Zissou1 ramp
         used by the R source.
@@ -348,6 +421,14 @@ def plot_cascade(
     -------
     pheatmap.PHeatmap
         Heatmap object with ``gtable`` and optional row tree.
+
+    Notes
+    -----
+    The Python defaults keep R's row ordering, column ordering, row scaling,
+    border-free heatmap, and Zissou1 palette, but add labels/annotations so the
+    heatmap carries more information. The sparse R visual default is:
+    ``plot_cascade(result, show_gene_names=False, show_peak_time=False,
+    show_time_points=False)``.
     """
     if not isinstance(result, CascadeResult):
         raise TypeError("plot_cascade expects a CascadeResult from cascade().")
@@ -358,14 +439,28 @@ def plot_cascade(
     yhat_scaled = yhat_scaled.loc[ordered_genes, :]
     if color is None:
         color = _zissou1_palette(12)
+
+    user_annotation_row = kwargs.pop("annotation_row", None)
+    user_annotation_col = kwargs.pop("annotation_col", None)
+    annotation_row = (
+        _cascade_row_annotation(result, ordered_genes) if show_peak_time else None
+    )
+    annotation_col = _cascade_col_annotation(result) if show_time_points else None
+    annotation_row = _merge_annotation(annotation_row, user_annotation_row)
+    annotation_col = _merge_annotation(annotation_col, user_annotation_col)
+
     return pheatmap(
         yhat_scaled,
         color=list(color),
-        cluster_cols=False,
-        cluster_rows=bool(cluster_heatmap),
-        border_color=None,
-        show_rownames=False,
-        show_colnames=False,
+        cluster_cols=kwargs.pop("cluster_cols", False),
+        cluster_rows=kwargs.pop("cluster_rows", False),
+        border_color=kwargs.pop("border_color", None),
+        show_rownames=kwargs.pop("show_rownames", show_gene_names),
+        show_colnames=kwargs.pop("show_colnames", False),
+        annotation_row=annotation_row,
+        annotation_col=annotation_col,
+        annotation_names_row=kwargs.pop("annotation_names_row", True),
+        annotation_names_col=kwargs.pop("annotation_names_col", True),
         silent=silent,
         **kwargs,
     )

@@ -48,19 +48,18 @@ See [Tutorials](tutorials/tradeSeq.ipynb) for the full workflow walkthrough.
 
 ## AnnData slot schema
 
-`fit_gam` mutates `adata` in place. The R `colData(sce)$tradeSeq$*`,
-`rowData(sce)$tradeSeq$*`, and `metadata(sce)$tradeSeq$*` payloads map to:
+`fit_gam` mutates `adata` in place. The R fitted-container payloads map to:
 
-| R slot | AnnData slot |
+| R payload | AnnData slot |
 |---|---|
-| `counts(sce)` | `adata.layers["counts"]` |
-| `rowData(sce)$tradeSeq$beta` | `adata.varm["tradeseq_beta"]` |
-| `rowData(sce)$tradeSeq$Sigma` | `adata.varm["tradeseq_Sigma"]` |
-| `rowData(sce)$tradeSeq$converged` | `adata.var["tradeseq_converged"]` |
-| `colData(sce)$tradeSeq$dm` | `adata.uns["tradeseq"]["design_matrix"]` |
-| `colData(sce)$tradeSeq$X` | `adata.uns["tradeseq"]["lpmatrix"]` |
-| `colData(sce)$tradeSeq$conditions` | `adata.uns["tradeseq"]["conditions"]` |
-| `metadata(sce)$tradeSeq$knots` | `adata.uns["tradeseq"]["knots"]` |
+| counts assay | `adata.layers["counts"]` |
+| row-level `tradeSeq$beta` | `adata.varm["tradeseq_beta"]` |
+| row-level `tradeSeq$Sigma` | `adata.varm["tradeseq_Sigma"]` |
+| row-level `tradeSeq$converged` | `adata.var["tradeseq_converged"]` |
+| cell-level `tradeSeq$dm` | `adata.uns["tradeseq"]["design_matrix"]` |
+| cell-level `tradeSeq$X` | `adata.uns["tradeseq"]["lpmatrix"]` |
+| cell-level `tradeSeq$conditions` | `adata.uns["tradeseq"]["conditions"]` |
+| metadata `tradeSeq$knots` | `adata.uns["tradeseq"]["knots"]` |
 
 The namespace prefix (default `"tradeseq"`) can be changed via the `key_added`
 argument of `fit_gam` for parallel-fit workflows.
