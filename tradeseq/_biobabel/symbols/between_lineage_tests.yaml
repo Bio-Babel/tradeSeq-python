@@ -1,0 +1,241 @@
+# Between-lineage Wald tests (and the condition contrast). All read fit_gam's
+# beta/Sigma, return a per-gene DataFrame, and never mutate the AnnData.
+- id: tradeseq.diff_end_test
+  import_path: tradeseq.diff_end_test
+  kind: function
+  signature: >-
+    diff_end_test(adata, *, global_=True, pairwise=False, l2fc=0.0,
+    key='tradeseq') -> pandas.DataFrame
+  purpose: Test differential expression between the endpoints of different lineages.
+  description: >-
+    Port of tradeSeq::diffEndTest. For every pair of lineages, a multivariate
+    Wald test of equal average expression at the endpoints - the canonical
+    "differentiated cell-type marker" test. Needs >= 2 lineages. With exactly
+    two lineages pairwise == global, so pairwise is silently disabled.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container previously populated by fit_gam.
+  - name: global_
+    type: bool
+    required: false
+    default: true
+    description: Omnibus statistic across all lineage pairs.
+  - name: pairwise
+    type: bool
+    required: false
+    default: false
+    description: Per-pair statistics (only meaningful with > 2 lineages).
+  - name: l2fc
+    type: float
+    required: false
+    default: 0.0
+    description: log2 fold-change threshold.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: pandas.DataFrame indexed by gene; columns (waldStat, df, pvalue, logFC1_2, ...).
+  requires:
+  - adata.uns['tradeseq'] populated by fit_gam
+  - adata.varm['tradeseq_beta'] and adata.varm['tradeseq_Sigma'] present
+  - the trajectory has at least 2 lineages
+  examples:
+  - end = ts.diff_end_test(adata); end.sort_values('waldStat', ascending=False).head()
+  failure_fixes:
+  - when: "ValueError: You cannot run this test with only one lineage"
+    suggest:
+    - diff_end_test is a between-lineage test; it needs a branching trajectory (>= 2 lineages).
+  - when: "KeyError: adata.uns has no key 'tradeseq'"
+    suggest:
+    - Run tradeseq.fit_gam(adata) first.
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.pattern_test
+  - tradeseq.start_vs_end_test
+
+- id: tradeseq.pattern_test
+  import_path: tradeseq.pattern_test
+  kind: function
+  signature: >-
+    pattern_test(adata, *, global_=True, pairwise=False, l2fc=0.0,
+    n_points=None, eigen_thresh=1e-2, key='tradeseq',
+    pseudotime_key='pseudotime') -> pandas.DataFrame
+  purpose: Test whether smoothed expression patterns differ between lineages.
+  description: >-
+    Port of tradeSeq::patternTest. Compares the fitted curves between lineages
+    at 2 * n_knots equally-spaced pseudotime points. Internally this is exactly
+    early_de_test(knots=None). Combine with diff_end_test to find transient
+    markers (different pattern, same endpoints). fcMedian summarizes the median
+    fold change across the grid.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container previously populated by fit_gam.
+  - name: global_
+    type: bool
+    required: false
+    default: true
+  - name: pairwise
+    type: bool
+    required: false
+    default: false
+    description: Per-pair columns (disabled with a warning when only 2 lineages).
+  - name: l2fc
+    type: float
+    required: false
+    default: 0.0
+  - name: n_points
+    type: int | None
+    required: false
+    default: null
+    description: Grid points per lineage; None resolves to 2 * nknots(adata).
+  - name: eigen_thresh
+    type: float
+    required: false
+    default: 0.01
+    description: Relative eigenvalue cutoff for the contrast covariance; lower is more lenient.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: pandas.DataFrame indexed by gene; columns (waldStat, df, pvalue, fcMedian) plus per-pair columns when pairwise=True and > 2 lineages.
+  requires:
+  - adata.uns['tradeseq'] populated by fit_gam
+  - adata.varm['tradeseq_beta'] and adata.varm['tradeseq_Sigma'] present
+  examples:
+  - pat = ts.pattern_test(adata); pat.sort_values('waldStat', ascending=False).head()
+  - pat2 = ts.pattern_test(adata, l2fc=np.log2(1.5))  # fold-change threshold
+  failure_fixes:
+  - when: "KeyError: adata.uns has no key 'tradeseq'"
+    suggest:
+    - Run tradeseq.fit_gam(adata) first.
+  related:
+  - tradeseq.early_de_test
+  - tradeseq.diff_end_test
+  - tradeseq.fit_gam
+
+- id: tradeseq.early_de_test
+  import_path: tradeseq.early_de_test
+  kind: function
+  signature: >-
+    early_de_test(adata, *, knots=None, global_=True, pairwise=False, l2fc=0.0,
+    n_points=None, eigen_thresh=1e-2, key='tradeseq',
+    pseudotime_key='pseudotime') -> pandas.DataFrame
+  purpose: Test for between-lineage expression differences within a chosen knot region.
+  description: >-
+    Port of tradeSeq::earlyDETest. Same machinery as pattern_test but restricted
+    to the pseudotime region between two knots, e.g. knots=(1, 2) probes early
+    differentiation right after the bifurcation. With knots=None it equals
+    pattern_test. Use plot_gene_count(adata, clusters_key=...) to see where the
+    fitted knots sit before choosing a region.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container previously populated by fit_gam.
+  - name: knots
+    type: sequence[int] | None
+    required: false
+    default: null
+    description: 1-indexed (k_low, k_high) knot range. None covers the full trajectory (== pattern_test).
+  - name: global_
+    type: bool
+    required: false
+    default: true
+  - name: pairwise
+    type: bool
+    required: false
+    default: false
+  - name: l2fc
+    type: float
+    required: false
+    default: 0.0
+  - name: eigen_thresh
+    type: float
+    required: false
+    default: 0.01
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: pandas.DataFrame indexed by gene; same columns as pattern_test.
+  requires:
+  - adata.uns['tradeseq'] populated by fit_gam
+  - adata.varm['tradeseq_beta'] and adata.varm['tradeseq_Sigma'] present
+  examples:
+  - early = ts.early_de_test(adata, knots=(1, 2))
+  failure_fixes:
+  - when: "ValueError: knots must consist of 2 integers below the number of knots"
+    suggest:
+    - Pass a (k_low, k_high) pair with both values <= nknots(adata).
+  related:
+  - tradeseq.pattern_test
+  - tradeseq.plot_gene_count
+  - tradeseq.nknots
+
+- id: tradeseq.condition_test
+  import_path: tradeseq.condition_test
+  kind: function
+  signature: >-
+    condition_test(adata, *, global_=True, pairwise=False, lineages=False,
+    l2fc=0.0, eigen_thresh=1e-2, knots=None, key='tradeseq') -> pandas.DataFrame
+  purpose: Test differential expression between conditions within a lineage.
+  description: >-
+    Port of tradeSeq::conditionTest. Requires that fit_gam was called with
+    conditions_key set, so the with-conditions design and
+    adata.uns[key]['conditions'] exist. Tests whether expression differs between
+    condition levels along each lineage.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container populated by fit_gam(conditions_key=...).
+  - name: global_
+    type: bool
+    required: false
+    default: true
+  - name: pairwise
+    type: bool
+    required: false
+    default: false
+    description: Per-condition-pair columns (disabled with a warning when only 2 conditions).
+  - name: lineages
+    type: bool
+    required: false
+    default: false
+    description: Per-lineage columns.
+  - name: l2fc
+    type: float
+    required: false
+    default: 0.0
+  - name: knots
+    type: sequence[int] | None
+    required: false
+    default: null
+    description: Optional 1-indexed (k1, k2) knot range; None covers (1, nKnots).
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: pandas.DataFrame indexed by gene; columns (waldStat, df, pvalue) plus per-pair / per-lineage blocks per the flags.
+  requires:
+  - fit_gam was run with conditions_key (adata.uns['tradeseq']['conditions'] is not None)
+  - adata.varm['tradeseq_beta'] and adata.varm['tradeseq_Sigma'] present
+  examples:
+  - ts.fit_gam(adata, conditions_key='condition', n_knots=6)
+  - cond = ts.condition_test(adata)
+  failure_fixes:
+  - when: condition_test errors or finds no conditions
+    suggest:
+    - Re-run fit_gam with conditions_key pointing at an adata.obs categorical column with >= 2 levels.
+    explanation: condition_test reads the with-conditions design that only fit_gam(conditions_key=...) writes.
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.pattern_test

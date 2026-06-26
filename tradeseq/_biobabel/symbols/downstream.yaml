@@ -1,0 +1,203 @@
+# Downstream analyses built on the fitted smoothers: pattern clustering and the
+# expression cascade.
+- id: tradeseq.cluster_expression_patterns
+  import_path: tradeseq.cluster_expression_patterns
+  kind: function
+  signature: >-
+    cluster_expression_patterns(models, *, n_points, genes, n_clusters=None,
+    key='tradeseq', random_state=176201) -> ClusterResult
+  purpose: Cluster genes by their fitted expression pattern along the trajectory.
+  description: >-
+    Port of tradeSeq::clusterExpressionPatterns. Builds a row-standardised
+    smoother-profile matrix on an n_points grid for the requested genes and
+    clusters them. Tier-3 deviation - the R RSEC consensus pipeline is replaced
+    by sklearn Ward AgglomerativeClustering; when n_clusters is None a silhouette
+    sweep picks k. Returns a ClusterResult namedtuple (cluster_labels: Series;
+    yhat_scaled: DataFrame of standardised profiles; long_df: tidy
+    gene/cluster/profile/time_point view). n_points and genes are required.
+  parameters:
+  - name: models
+    type: anndata.AnnData | dict[str, FittedGam]
+    required: true
+    description: fit_gam-populated AnnData or the return_models=True dict.
+  - name: n_points
+    type: int
+    required: true
+    description: Grid points per lineage for the profile matrix (>= 2).
+  - name: genes
+    type: sequence[str] | sequence[int]
+    required: true
+    description: Genes to cluster (names or 0-based indices). Need >= 2.
+  - name: n_clusters
+    type: int | None
+    required: false
+    default: null
+    description: Number of clusters; None triggers a silhouette-based search.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  - name: random_state
+    type: int
+    required: false
+    default: 176201
+  mutates: ''
+  returns: ClusterResult namedtuple (cluster_labels, yhat_scaled, long_df).
+  requires:
+  - models populated by fit_gam (AnnData) OR a return_models=True dict
+  examples:
+  - res = ts.cluster_expression_patterns(adata, n_points=20, genes=list(adata.var_names[:100]), n_clusters=4)
+  - res.long_df.head()
+  failure_fixes:
+  - when: "ValueError: Clustering requires at least 2 genes"
+    suggest:
+    - Pass at least two genes in `genes`.
+  - when: "ValueError: n_points must be at least 2"
+    suggest:
+    - Use n_points >= 2.
+  related:
+  - tradeseq.predict_smooth
+  - tradeseq.cascade
+  - tradeseq.fit_gam
+
+- id: tradeseq.cascade
+  import_path: tradeseq.cascade
+  kind: function
+  signature: >-
+    cascade(adata, *, lineage=1, genes=None, epsilon=1e-6, n_points=100,
+    derivative_threshold=0.1, der_pval_threshold=None, key='tradeseq')
+    -> CascadeResult
+  purpose: Find and order genes whose expression significantly increases along one lineage.
+  description: >-
+    Port of the computational half of tradeSeq::cascade. Estimates pointwise
+    first derivatives of the fitted smoother by finite differencing, keeps genes
+    with a significant positive derivative, and orders them by first post-increase
+    peak time. Returns a CascadeResult; render it with plot_cascade. The compute
+    and the heatmap are deliberately split (R fused them).
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container populated by fit_gam.
+  - name: lineage
+    type: int
+    required: false
+    default: 1
+    description: 1-based lineage id to build the cascade for.
+  - name: genes
+    type: sequence[str | int] | None
+    required: false
+    default: null
+    description: Genes to inspect; None uses all genes.
+  - name: n_points
+    type: int
+    required: false
+    default: 100
+    description: Grid points along the lineage.
+  - name: derivative_threshold
+    type: float
+    required: false
+    default: 0.1
+    description: Positive-derivative threshold tested at each grid point.
+  - name: der_pval_threshold
+    type: float | None
+    required: false
+    default: null
+    description: P-value threshold for "significantly increasing"; None uses 0.05 / n_points.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: CascadeResult (peak_time, yhat, derivatives, sd_derivatives, test_statistics, p_values, lineage, grid).
+  requires:
+  - adata.uns['tradeseq'] populated by fit_gam
+  - adata.varm['tradeseq_beta'] and adata.varm['tradeseq_Sigma'] present
+  - lineage <= number of lineages in the design
+  examples:
+  - res = ts.cascade(adata, lineage=1, n_points=100); res.peak_time.head()
+  failure_fixes:
+  - when: "ValueError: 'lineage' must be <= number of lineages"
+    suggest:
+    - Pass a 1-based lineage id within range (see the columns of the design / n lineages).
+  - when: "KeyError: adata.uns has no key 'tradeseq'"
+    suggest:
+    - Run tradeseq.fit_gam(adata) first.
+  related:
+  - tradeseq.plot_cascade
+  - tradeseq.CascadeResult
+  - tradeseq.fit_gam
+
+- id: tradeseq.CascadeResult
+  import_path: tradeseq.CascadeResult
+  kind: class
+  signature: CascadeResult(peak_time, yhat, derivatives, sd_derivatives, test_statistics, p_values, lineage, grid)
+  purpose: NamedTuple result of cascade(); the input to plot_cascade.
+  description: >-
+    Immutable namedtuple returned by cascade. Fields - peak_time (Series of peak
+    pseudotime per retained gene), yhat (wide fitted-expression matrix for the
+    retained genes), derivatives / sd_derivatives (pointwise estimates + SEs),
+    test_statistics, p_values (pointwise, after the positive-derivative filter),
+    lineage (1-based id), grid (prediction grid). Pass it straight to
+    plot_cascade.
+  mutates: ''
+  returns: 'fields: peak_time, yhat, derivatives, sd_derivatives, test_statistics, p_values, lineage, grid'
+  examples:
+  - res = ts.cascade(adata, lineage=1); ts.plot_cascade(res)
+  related:
+  - tradeseq.cascade
+  - tradeseq.plot_cascade
+
+- id: tradeseq.plot_cascade
+  import_path: tradeseq.plot_cascade
+  kind: function
+  signature: >-
+    plot_cascade(result, *, show_gene_names=True, show_peak_time=True,
+    show_time_points=True, color=None, silent=True, **kwargs) -> pheatmap.PHeatmap
+  purpose: Draw the cascade heatmap from a CascadeResult.
+  description: >-
+    Renders the cascade as a pheatmap heatmap (rows ordered by peak time, rows
+    standardised, Zissou1 palette). Returns the PHeatmap object; with silent=True
+    it is built without drawing to the active grid device, so render it via the
+    grid_py device path. The sparse R-equivalent look is
+    plot_cascade(result, show_gene_names=False, show_peak_time=False, show_time_points=False).
+  parameters:
+  - name: result
+    type: tradeseq.CascadeResult
+    required: true
+    description: Output of cascade().
+  - name: show_gene_names
+    type: bool
+    required: false
+    default: true
+  - name: show_peak_time
+    type: bool
+    required: false
+    default: true
+    description: Add a row annotation with each gene's peak pseudotime.
+  - name: color
+    type: sequence[str] | None
+    required: false
+    default: null
+    description: Heatmap palette; None uses the 12-colour Zissou1 ramp.
+  - name: silent
+    type: bool
+    required: false
+    default: true
+    description: Build the heatmap object without drawing to the active device.
+  mutates: ''
+  returns: pheatmap.PHeatmap (carries the gtable and optional row tree).
+  requires:
+  - result is a non-empty CascadeResult from cascade()
+  examples:
+  - heat = ts.plot_cascade(ts.cascade(adata, lineage=1), silent=True, show_gene_names=False)
+  failure_fixes:
+  - when: "TypeError: plot_cascade expects a CascadeResult"
+    suggest:
+    - Pass the object returned by cascade(), not a DataFrame.
+  - when: "ValueError: Cannot plot an empty cascade result"
+    suggest:
+    - No genes passed the increase filter; lower derivative_threshold or der_pval_threshold in cascade().
+  related:
+  - tradeseq.cascade
+  - tradeseq.CascadeResult

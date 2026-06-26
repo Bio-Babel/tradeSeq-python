@@ -1,0 +1,140 @@
+# Visualization. Both return ggplot2_py.GGPlot objects (the Bio-Babel graphics
+# stack, not matplotlib); render/save them via the ggplot2_py / patchwork path.
+- id: tradeseq.plot_smoothers
+  import_path: tradeseq.plot_smoothers
+  kind: function
+  signature: >-
+    plot_smoothers(adata, *, gene, n_points=100, lwd=2.0, size=0.667,
+    xlab='Pseudotime', ylab='Log(expression + 1)', border=True, alpha=1.0,
+    sample=1.0, point_col=None, curves_cols=None, plot_lineages=True,
+    lineages_to_plot=None, layer='counts', pseudotime_key='pseudotime',
+    key='tradeseq', random_state=None) -> ggplot2_py.GGPlot
+  purpose: Plot the fitted per-lineage smoothers over the per-cell expression scatter.
+  description: >-
+    Port of tradeSeq::plotSmoothers. Draws each lineage's predicted smoother as
+    a geom_line over a geom_point scatter of log1p(count) vs pseudotime. Pass a
+    list of genes to facet. Returns a ggplot2_py figure; set fig_width/fig_height
+    on it before display, or save via the ggplot2_py/ggsave path.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container populated by fit_gam.
+  - name: gene
+    type: str | int | sequence
+    required: true
+    description: Gene name / 0-based index, or a list to facet multiple genes.
+  - name: n_points
+    type: int
+    required: false
+    default: 100
+    description: Grid points per lineage for the predicted smoother.
+  - name: lwd
+    type: float
+    required: false
+    default: 2.0
+    description: Smoother line width.
+  - name: point_col
+    type: str | sequence | None
+    required: false
+    default: null
+    description: An adata.obs column name (or per-cell labels) to colour points by.
+  - name: curves_cols
+    type: sequence[str] | None
+    required: false
+    default: null
+    description: Per-lineage smoother colours (length must match the lineage count, else viridis fallback).
+  - name: lineages_to_plot
+    type: iterable[int] | None
+    required: false
+    default: null
+    description: 1-based lineage indices to draw; None plots all.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: ggplot2_py.GGPlot.
+  requires:
+  - adata.uns['tradeseq'] populated by fit_gam (design_matrix, lpmatrix, knots)
+  - adata.varm['tradeseq_beta'] present and adata.layers['counts'] available
+  examples:
+  - p = ts.plot_smoothers(adata, gene='Irf8', lwd=1)
+  - p = ts.plot_smoothers(adata, gene=['Irf8', 'Mt1'])  # facetted
+  failure_fixes:
+  - when: "KeyError: adata.uns has no key 'tradeseq'"
+    suggest:
+    - Run tradeseq.fit_gam(adata) before plotting smoothers.
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.plot_gene_count
+  - tradeseq.predict_smooth
+
+- id: tradeseq.plot_gene_count
+  import_path: tradeseq.plot_gene_count
+  kind: function
+  signature: >-
+    plot_gene_count(adata, *, gene=None, clusters_key=None, layer='counts',
+    key='tradeseq', title=None, embedding_key='X_umap',
+    slingshot_key='slingshot') -> ggplot2_py.GGPlot
+  purpose: Plot cells in the embedding with principal curves + knots, coloured by gene or cluster.
+  description: >-
+    Port of tradeSeq::plotGeneCount. Scatters cells on the 2-D embedding,
+    overlays each lineage's principal curve (and, once fit_gam has run, the
+    knots), and colours either by log1p expression of `gene` or by the
+    categorical `clusters_key`. Exactly one of gene / clusters_key is required;
+    gene wins if both are given. Does NOT require fit_gam (knots are only added
+    when adata.uns[key]['knots'] is present).
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container with the embedding and slingshot curves; optionally fit_gam slots for knots.
+  - name: gene
+    type: str | int | None
+    required: false
+    default: null
+    description: Colour by this gene's log1p expression. Mutually informative with clusters_key.
+  - name: clusters_key
+    type: str | None
+    required: false
+    default: null
+    description: adata.obs column to colour cells by (used when gene is None).
+  - name: title
+    type: str | None
+    required: false
+    default: null
+    description: Override the legend/colour-bar title.
+  - name: embedding_key
+    type: str
+    required: false
+    default: X_umap
+    description: adata.obsm key for the 2-D embedding.
+  - name: slingshot_key
+    type: str
+    required: false
+    default: slingshot
+    description: adata.uns key holding the per-lineage principal-curve dict.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+    description: fit_gam namespace; when its knots are present they are overlaid.
+  mutates: ''
+  returns: ggplot2_py.GGPlot.
+  requires:
+  - adata.obsm['X_umap'] (or your embedding_key) is a 2-D embedding
+  - adata.uns['slingshot']['curves'] holds the principal-curve geometry
+  examples:
+  - p = ts.plot_gene_count(adata, clusters_key='celltype', title='Colored by cell type')
+  - p = ts.plot_gene_count(adata, gene='Irf8')
+  failure_fixes:
+  - when: "ValueError: Either gene and counts, or clusters argument must be supplied"
+    suggest:
+    - Pass gene= to colour by expression, or clusters_key= to colour by a category.
+  - when: "KeyError on the embedding or slingshot curves"
+    suggest:
+    - Ensure adata.obsm['X_umap'] and adata.uns['slingshot']['curves'] exist (load_paul15 provides both).
+  related:
+  - tradeseq.plot_smoothers
+  - tradeseq.fit_gam

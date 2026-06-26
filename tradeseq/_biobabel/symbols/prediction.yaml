@@ -1,0 +1,81 @@
+# Fitted-value extraction. Both accept either a fit_gam-populated AnnData or the
+# return_models=True dict, and both are pure (no mutation).
+- id: tradeseq.predict_cells
+  import_path: tradeseq.predict_cells
+  kind: function
+  signature: predict_cells(adata, *, gene, key='tradeseq') -> numpy.ndarray
+  purpose: Per-cell fitted expression (count scale) for the requested gene(s).
+  description: >-
+    Port of tradeSeq::predictCells. Returns exp(X @ beta + offset) per cell, a
+    (n_genes_requested, n_cells) matrix. Accepts a fit_gam-populated AnnData or
+    the return_models=True dict. Useful as input to any external clustering.
+  parameters:
+  - name: adata
+    type: anndata.AnnData | dict[str, FittedGam]
+    required: true
+    description: fit_gam-populated AnnData or the return_models=True dict.
+  - name: gene
+    type: str | int | sequence
+    required: true
+    description: Gene name(s) (matching var_names) or 0-based index/indices.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: numpy.ndarray of shape (n_genes_requested, n_cells).
+  requires:
+  - adata populated by fit_gam (AnnData path) OR a return_models=True dict
+  examples:
+  - yhat = ts.predict_cells(adata, gene='Irf8')  # shape (1, n_cells)
+  failure_fixes:
+  - when: "ValueError: gene id not in the container"
+    suggest:
+    - Use a name from adata.var_names, or a 0-based integer index.
+  related:
+  - tradeseq.predict_smooth
+  - tradeseq.cluster_expression_patterns
+
+- id: tradeseq.predict_smooth
+  import_path: tradeseq.predict_smooth
+  kind: function
+  signature: predict_smooth(adata, *, gene, n_points=100, tidy=True, key='tradeseq')
+  purpose: Fitted smoother values on a uniform pseudotime grid per lineage.
+  description: >-
+    Port of tradeSeq::predictSmooth. Evaluates the fitted smoother on a uniform
+    grid of n_points per lineage. tidy=True (AnnData path) returns a long-form
+    DataFrame (lineage, time, gene, yhat); tidy=False returns the wide
+    (n_genes, n_curves * n_points) matrix. List-mode always returns the wide
+    matrix.
+  parameters:
+  - name: adata
+    type: anndata.AnnData | dict[str, FittedGam]
+    required: true
+    description: fit_gam-populated AnnData or the return_models=True dict.
+  - name: gene
+    type: str | int | sequence
+    required: true
+    description: Gene identifier(s) to predict.
+  - name: n_points
+    type: int
+    required: false
+    default: 100
+    description: Evaluation points per lineage.
+  - name: tidy
+    type: bool
+    required: false
+    default: true
+    description: Long-form DataFrame when True; wide matrix when False (ignored in list-mode).
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+  mutates: ''
+  returns: pandas.DataFrame (long-form, columns lineage/time/gene/yhat) when tidy=True; numpy.ndarray (wide) otherwise.
+  requires:
+  - adata populated by fit_gam (AnnData path) OR a return_models=True dict
+  examples:
+  - smooth = ts.predict_smooth(adata, gene='Irf8', n_points=40)
+  related:
+  - tradeseq.predict_cells
+  - tradeseq.cluster_expression_patterns

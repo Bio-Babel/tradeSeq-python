@@ -1,0 +1,152 @@
+# Knot-count selection. These run BEFORE fit_gam — they fit throwaway models
+# internally and never read fit_gam's slots.
+- id: tradeseq.evaluate_k
+  import_path: tradeseq.evaluate_k
+  kind: function
+  signature: >-
+    evaluate_k(adata, *, layer='counts', pseudotime_key='pseudotime',
+    weights_key='cell_weights', k_range=range(3, 11), n_genes=500, plot=True,
+    aic_diff=2.0, random_state=176201, verbose=True, parallel=False, n_jobs=1,
+    U=None, sample_weights=None, offset=None, family='nb', gcv=False,
+    conditions=None)
+  purpose: Pick n_knots by refitting the NB-GAM across candidate knot counts and comparing AIC.
+  description: >-
+    Port of tradeSeq::evaluateK. For each k in k_range it fits an NB-GAM to a
+    random subset of n_genes genes and records the per-gene AIC, returning a
+    (n_genes, len(k_range)) DataFrame indexed by sampled gene with "k: <k>"
+    columns. Run this BEFORE fit_gam to choose n_knots; it fits its own models
+    and does not read or write the fit_gam slots. Inspect the result with
+    plot_evaluatek_results.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Same container fit_gam expects (raw counts + pseudotime + cell_weights).
+  - name: k_range
+    type: iterable[int]
+    required: false
+    default: range(3, 11)
+    description: Candidate knot counts. Must have >1 entry and every value >= 3.
+  - name: n_genes
+    type: int
+    required: false
+    default: 500
+    description: Number of genes randomly sampled for the diagnostic. Must be <= n_vars.
+  - name: plot
+    type: bool
+    required: false
+    default: true
+    description: Render the 4-panel diagnostic via plot_evaluatek_results. The matrix is returned either way.
+  - name: random_state
+    type: int
+    required: false
+    default: 176201
+    description: Seed for the gene subsample and per-k cell assignment.
+  mutates: ''
+  returns: pandas.DataFrame (n_genes, len(k_range)) of per-gene AIC; optionally also renders the patchwork diagnostic.
+  requires:
+  - adata.layers['counts'] holds raw counts
+  - adata.obsm['pseudotime'] and adata.obsm['cell_weights'] populated
+  examples:
+  - aic = ts.evaluate_k(adata, k_range=range(3, 8), n_genes=200, plot=False)
+  - ts.plot_evaluatek_results(aic, k_range=range(3, 8))
+  failure_fixes:
+  - when: "ValueError: Cannot fit with fewer than 3 knots"
+    suggest:
+    - Use k values >= 3 in k_range.
+  - when: "ValueError on n_genes greater than the number of genes"
+    suggest:
+    - Lower n_genes to at most adata.n_vars.
+  related:
+  - tradeseq.evaluate_k2
+  - tradeseq.plot_evaluatek_results
+  - tradeseq.fit_gam
+
+- id: tradeseq.evaluate_k2
+  import_path: tradeseq.evaluate_k2
+  kind: function
+  signature: >-
+    evaluate_k2(adata, *, layer='counts', pseudotime_key='pseudotime',
+    weights_key='cell_weights', k_range=range(3, 11), n_genes=500, plot=True,
+    aic_diff=2.0, random_state=176201, verbose=True, parallel=False, n_jobs=1,
+    backend='threads', batch_size='auto', U=None, sample_weights=None,
+    offset=None, family='nb', gcv=False, conditions=None, n_lam=31,
+    log_lam_range=(-8.0, 18.0), warm_start_lam=True)
+  purpose: Optimized evaluate_k for expensive knot diagnostics (same public contract).
+  description: >-
+    Faster drop-in for evaluate_k - identical AnnData inputs, sampled-gene
+    semantics and returned table layout. It reads AIC/GCV directly off the fit,
+    warm-starts the lambda-grid scan, and defaults to a thread backend so the
+    shared design arrays are not re-serialized to worker processes. Prefer this
+    for large n_genes or wide k_range.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Same container fit_gam expects.
+  - name: k_range
+    type: iterable[int]
+    required: false
+    default: range(3, 11)
+  - name: n_genes
+    type: int
+    required: false
+    default: 500
+  - name: backend
+    type: str
+    required: false
+    default: threads
+    description: '"threads" (default) or "processes" when parallel=True.'
+  - name: warm_start_lam
+    type: bool
+    required: false
+    default: true
+    description: Warm-start the lambda grid inside each outer alpha loop.
+  mutates: ''
+  returns: pandas.DataFrame identical in shape/labels to evaluate_k.
+  requires:
+  - adata.layers['counts'] holds raw counts
+  - adata.obsm['pseudotime'] and adata.obsm['cell_weights'] populated
+  examples:
+  - aic = ts.evaluate_k2(adata, k_range=range(3, 8), n_genes=200, plot=False)
+  related:
+  - tradeseq.evaluate_k
+  - tradeseq.plot_evaluatek_results
+
+- id: tradeseq.plot_evaluatek_results
+  import_path: tradeseq.plot_evaluatek_results
+  kind: function
+  signature: >-
+    plot_evaluatek_results(aic_matrix, *, k_range=None, aic_diff=2.0,
+    fig_width=12.0, fig_height=3.0, fig_dpi=None) -> patchwork.Patchwork
+  purpose: Render the 4-panel evaluateK knot diagnostic.
+  description: >-
+    Port of tradeSeq::plot_evalutateK_results. Turns the AIC matrix from
+    evaluate_k / evaluate_k2 into four patchwork-composed ggplot2_py panels -
+    per-gene AIC deviation boxplot, mean AIC, mean relative AIC (elbow), and the
+    optimal-k histogram. When a DataFrame is passed, k_range is parsed from its
+    "k: <k>" column names.
+  parameters:
+  - name: aic_matrix
+    type: numpy.ndarray | pandas.DataFrame
+    required: true
+    description: The (n_genes, len(k_range)) AIC matrix from evaluate_k.
+  - name: k_range
+    type: iterable[int] | None
+    required: false
+    default: null
+    description: The k axis values; inferred from DataFrame columns when omitted.
+  - name: aic_diff
+    type: float
+    required: false
+    default: 2.0
+    description: Minimum AIC range a gene must show to enter the optimal-k panel.
+  mutates: ''
+  returns: patchwork.Patchwork (4-panel layout). Display in a notebook or save via the patchwork/ggsave path.
+  requires:
+  - aic_matrix came from evaluate_k / evaluate_k2
+  examples:
+  - 'fig = ts.plot_evaluatek_results(aic, k_range=range(3, 8))'
+  related:
+  - tradeseq.evaluate_k
+  - tradeseq.evaluate_k2

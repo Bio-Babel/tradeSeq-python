@@ -1,0 +1,28 @@
+# Bundled example data - the easiest way to get a container with a trajectory
+# already in place (tradeSeq does not infer trajectories).
+- id: tradeseq.load_paul15
+  import_path: tradeseq.load_paul15
+  kind: function
+  signature: load_paul15() -> anndata.AnnData
+  purpose: Load the bundled Paul-2015 myeloid trajectory fixture (counts + pseudotime + curves).
+  description: >-
+    Returns the 2660 cells x 240 genes AnnData repacking of the R tradeSeq
+    countMatrix / crv / celltype datasets. The slingshot trajectory (2 lineages)
+    was computed once on the R side and frozen in, so the package needs no
+    trajectory-inference library at runtime. This is the canonical starting point
+    for every tutorial and the smoke test - it ships exactly the slots fit_gam
+    requires.
+  parameters: []
+  mutates: ''
+  returns: >-
+    anndata.AnnData (2660 x 240) with layers['counts'] (raw), obs['cluster'] /
+    obs['celltype'], obsm['X_umap'], obsm['pseudotime'] (cells x 2),
+    obsm['cell_weights'] (cells x 2), uns['slingshot']['curves'] /
+    ['lineages'], and uns['provenance'].
+  requires: []
+  writes: []
+  examples:
+  - import tradeseq as ts; adata = ts.load_paul15()
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.plot_gene_count

@@ -1,0 +1,191 @@
+# Foundation: model fitting + the per-gene container. Everything else in the
+# package reads what fit_gam writes.
+- id: tradeseq.fit_gam
+  import_path: tradeseq.fit_gam
+  kind: function
+  signature: >-
+    fit_gam(adata, *, layer='counts', pseudotime_key='pseudotime',
+    weights_key='cell_weights', U=None, conditions_key=None, genes=None,
+    sample_weights=None, offset=None, n_knots=6, family='nb', parallel=False,
+    n_jobs=1, verbose=True, return_models=False, aic=False, gcv=False,
+    key_added='tradeseq', copy=False)
+  purpose: Fit a per-gene negative-binomial GAM along every trajectory lineage.
+  description: >-
+    Port of tradeSeq::fitGAM. Reads raw counts, per-cell pseudotime and lineage
+    weights from the AnnData, builds the cubic-regression-spline design, and
+    fits one NB-GAM per gene. By default it mutates the AnnData in place,
+    writing the row-level coefficient/covariance/convergence payloads plus the
+    cell-level design under the `key_added` namespace; this is the prerequisite
+    state for the entire Wald battery, prediction, clustering and cascade. Pass
+    `conditions_key` to fit the with-conditions design that `condition_test`
+    needs, or `return_models=True` to get the per-gene `FittedGam` dict that the
+    `get_smoother_*` accessors require.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Cells × genes container holding raw counts and the trajectory artefacts.
+  - name: layer
+    type: str
+    required: false
+    default: counts
+    description: adata.layers key for the raw count matrix.
+  - name: pseudotime_key
+    type: str
+    required: false
+    default: pseudotime
+    description: adata.obsm key for the (cells × lineages) pseudotime matrix.
+  - name: weights_key
+    type: str
+    required: false
+    default: cell_weights
+    description: adata.obsm key for the (cells × lineages) per-cell lineage weights.
+  - name: conditions_key
+    type: str | None
+    required: false
+    default: null
+    description: adata.obs column with a categorical condition vector; enables condition_test. Single-level conditions are ignored with a warning.
+  - name: genes
+    type: list | range | None
+    required: false
+    default: null
+    description: Subset of gene names or integer indices to fit. None fits all genes (normalisation always uses all genes).
+  - name: U
+    type: numpy.ndarray | None
+    required: false
+    default: null
+    description: Fixed-effect design (n_cells, k). Defaults to a single intercept column.
+  - name: sample_weights
+    type: numpy.ndarray | None
+    required: false
+    default: null
+    description: Optional (n_genes, n_cells) observation-weight matrix, e.g. ZINB posterior weights.
+  - name: offset
+    type: numpy.ndarray | None
+    required: false
+    default: null
+    description: Explicit per-cell log-offset. None triggers TMM-normalized library-size offsetting.
+  - name: n_knots
+    type: int
+    required: false
+    default: 6
+    description: Number of knots for the cr-spline basis. Choose with evaluate_k.
+  - name: family
+    type: str
+    required: false
+    default: nb
+    description: '"nb" (negative binomial, runs the joint alpha loop) or "gaussian".'
+  - name: return_models
+    type: bool
+    required: false
+    default: false
+    description: If True, return dict[gene, FittedGam] instead of mutating the AnnData. Required by get_smoother_pvalues / get_smoother_test_stats.
+  - name: parallel
+    type: bool
+    required: false
+    default: false
+    description: Dispatch per-gene fits via joblib (set n_jobs > 1).
+  - name: key_added
+    type: str
+    required: false
+    default: tradeseq
+    description: Namespace prefix in adata.uns / adata.varm / adata.var. Every downstream call takes a matching `key=`.
+  - name: copy
+    type: bool
+    required: false
+    default: false
+    description: If True (and return_models=False), mutate and return a copy instead of editing in place.
+  mutates: adata (in place by default; a copy when copy=True). No mutation when return_models=True / aic=True.
+  returns: >-
+    None when mutating in place; AnnData when copy=True; dict[str, FittedGam]
+    when return_models=True; np.ndarray of per-gene AIC when aic=True (or
+    (aic, gcv) tuple when gcv=True).
+  requires:
+  - adata.layers['counts'] holds non-negative raw counts (or the `layer` you name)
+  - adata.obsm['pseudotime'] is the (cells × lineages) pseudotime matrix, no NaNs
+  - adata.obsm['cell_weights'] is the (cells × lineages) lineage-weight matrix, no NaNs, same shape as pseudotime
+  writes:
+  - adata.var['tradeseq_converged'] (bool per gene)
+  - adata.varm['tradeseq_beta'] (per-gene GAM coefficient matrix)
+  - adata.varm['tradeseq_Sigma'] (per-gene coefficient covariances)
+  - adata.uns['tradeseq'] (knots, design_matrix, lpmatrix, lpmatrix_columns, conditions, genes_fit, smooth_blocks)
+  examples:
+  - import tradeseq as ts; adata = ts.load_paul15(); ts.fit_gam(adata, n_knots=6)
+  - ts.fit_gam(adata, conditions_key='condition', n_knots=6)  # enables condition_test
+  - fits = ts.fit_gam(adata, n_knots=6, return_models=True)  # dict for get_smoother_*
+  failure_fixes:
+  - when: "KeyError: adata.layers has no key 'counts'"
+    suggest:
+    - Put raw counts in adata.layers['counts'], or pass layer='<your_layer>'.
+    explanation: fit_gam fits NB-GAMs on raw counts; it does not read adata.X by default.
+  - when: "KeyError: adata.obsm has no key 'pseudotime' / 'cell_weights'"
+    suggest:
+    - Run a trajectory-inference method first (e.g. slingshot) and store its pseudotime and curve weights in adata.obsm.
+    explanation: tradeSeq does NOT infer a trajectory; it consumes one. load_paul15() ships a worked example with both slots populated.
+  - when: "ValueError: The pseudotimes contain NA values"
+    suggest:
+    - Use slingPseudotime(..., na=FALSE)-style dense matrices; replace NaNs (cells off a lineage get weight 0, not NaN pseudotime).
+  - when: "ValueError: All values of the count matrix should be non-negative"
+    suggest:
+    - Pass the raw integer counts layer, not a log/scaled matrix, when family='nb'.
+  related:
+  - tradeseq.nknots
+  - tradeseq.evaluate_k
+  - tradeseq.association_test
+  - tradeseq.FittedGam
+
+- id: tradeseq.nknots
+  import_path: tradeseq.nknots
+  kind: function
+  signature: nknots(models, *, key='tradeseq') -> int
+  purpose: Return the number of knots fit_gam used for a fitted container.
+  description: >-
+    Port of tradeSeq::nknots. Reads the knot count back from an AnnData
+    previously populated by fit_gam (via adata.uns[key]['knots']) or recovers it
+    from a return_models=True dict by inspecting the smoother column names.
+  parameters:
+  - name: models
+    type: anndata.AnnData | dict[str, FittedGam]
+    required: true
+    description: A fit_gam-populated AnnData or the return_models=True dict.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+    description: Namespace prefix used by fit_gam (AnnData path only).
+  mutates: ''
+  returns: int (number of knots).
+  requires:
+  - adata.uns['tradeseq']['knots'] exists (i.e. fit_gam has run)
+  examples:
+  - 'ts.nknots(adata)  # -> 6'
+  failure_fixes:
+  - when: "KeyError: adata.uns['tradeseq'] missing 'knots'"
+    suggest:
+    - Call tradeseq.fit_gam(adata) before nknots.
+  related:
+  - tradeseq.fit_gam
+
+- id: tradeseq.FittedGam
+  import_path: tradeseq.FittedGam
+  kind: class
+  signature: FittedGam(coef_, cov_, lpmatrix_, dm_, summary_s_table, alpha_, converged_)
+  purpose: Per-gene fitted-model container returned by fit_gam(return_models=True).
+  description: >-
+    Thin dataclass mirroring only the mgcv `gam` attributes the tradeSeq exports
+    consume. You rarely construct it directly; fit_gam(return_models=True)
+    returns a dict[gene_name, FittedGam] (failed fits map to None). It is the
+    required input shape for get_smoother_pvalues / get_smoother_test_stats and
+    an accepted input for predict_cells / predict_smooth / cluster_expression_patterns.
+    Fields - coef_ (β vector), cov_ (Bayesian posterior covariance Vp),
+    lpmatrix_ (linear-predictor model matrix), dm_ (per-cell long-form design),
+    summary_s_table (per-smoother edf/Ref.df/Chi.sq/p-value), alpha_ (NB
+    dispersion), converged_ (bool).
+  mutates: ''
+  returns: 'instance attributes: coef_, cov_, lpmatrix_, dm_, summary_s_table, alpha_, converged_'
+  examples:
+  - "fits = ts.fit_gam(adata, return_models=True); fg = fits['Irf8']; fg.coef_.shape"
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.get_smoother_pvalues
+  - tradeseq.get_smoother_test_stats

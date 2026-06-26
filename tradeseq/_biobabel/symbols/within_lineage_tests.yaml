@@ -1,0 +1,127 @@
+# Within-lineage Wald tests. All read fit_gam's beta/Sigma, return a per-gene
+# DataFrame indexed by gene name, and never mutate the AnnData.
+- id: tradeseq.association_test
+  import_path: tradeseq.association_test
+  kind: function
+  signature: >-
+    association_test(adata, *, global_=True, lineages=False, l2fc=0.0,
+    n_points=None, contrast_type='start', inverse=None, eigen_thresh=1e-2,
+    key='tradeseq') -> pandas.DataFrame
+  purpose: Test whether average gene expression changes along pseudotime within a lineage.
+  description: >-
+    Port of tradeSeq::associationTest. Multivariate Wald test of the null that
+    all smoother coefficients are equal (i.e. expression is flat along
+    pseudotime). Dispatches to the with-conditions variant automatically when
+    fit_gam was run with conditions. The TREAT-style l2fc adds a fold-change
+    threshold.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container previously populated by fit_gam.
+  - name: global_
+    type: bool
+    required: false
+    default: true
+    description: Return the omnibus statistic across all lineages.
+  - name: lineages
+    type: bool
+    required: false
+    default: false
+    description: Also return per-lineage statistics.
+  - name: l2fc
+    type: float
+    required: false
+    default: 0.0
+    description: log2 fold-change threshold; 0 recovers the ordinary Wald test.
+  - name: n_points
+    type: int | None
+    required: false
+    default: null
+    description: Contrast points per lineage; None resolves to 2 * nknots(adata).
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+    description: Namespace fit_gam wrote to (must match fit_gam's key_added).
+  mutates: ''
+  returns: pandas.DataFrame indexed by gene; columns (waldStat, df, pvalue, meanLogFC), expanding with per-lineage blocks when lineages=True.
+  requires:
+  - adata.uns['tradeseq'] populated by fit_gam (design_matrix, lpmatrix, knots)
+  - adata.varm['tradeseq_beta'] and adata.varm['tradeseq_Sigma'] present
+  examples:
+  - res = ts.association_test(adata); res.sort_values('waldStat', ascending=False).head()
+  failure_fixes:
+  - when: "KeyError: adata.uns has no key 'tradeseq'"
+    suggest:
+    - Run tradeseq.fit_gam(adata, n_knots=6) before any test.
+    explanation: Every Wald test reads the coefficients/covariances fit_gam writes under adata.uns/varm[key].
+  - when: NaN rows in the result
+    suggest:
+    - Those genes failed to converge; check adata.var['tradeseq_converged'] and consider more knots or ZINB weights.
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.start_vs_end_test
+  - tradeseq.plot_smoothers
+
+- id: tradeseq.start_vs_end_test
+  import_path: tradeseq.start_vs_end_test
+  kind: function
+  signature: >-
+    start_vs_end_test(adata, *, global_=True, lineages=False,
+    pseudotime_values=None, l2fc=0.0, key='tradeseq') -> pandas.DataFrame
+  purpose: Test differential average expression between the start and end of each lineage.
+  description: >-
+    Port of tradeSeq::startVsEndTest. Multivariate Wald test comparing the
+    fitted smoother at the lineage start vs its end (or any two pseudotime
+    values via pseudotime_values). Good for finding progenitor -> differentiated
+    markers. Reports a signed log-fold-change per lineage.
+  parameters:
+  - name: adata
+    type: anndata.AnnData
+    required: true
+    description: Container previously populated by fit_gam.
+  - name: global_
+    type: bool
+    required: false
+    default: true
+    description: Return the omnibus statistic across lineages.
+  - name: lineages
+    type: bool
+    required: false
+    default: false
+    description: Also return per-lineage statistics.
+  - name: pseudotime_values
+    type: sequence[float] | None
+    required: false
+    default: null
+    description: Optional (t0, t1) pair to compare across all lineages instead of the natural endpoints.
+  - name: l2fc
+    type: float
+    required: false
+    default: 0.0
+    description: log2 fold-change threshold.
+  - name: key
+    type: str
+    required: false
+    default: tradeseq
+    description: Namespace fit_gam wrote to.
+  mutates: ''
+  returns: pandas.DataFrame indexed by gene; columns (waldStat, df, pvalue, logFClineage1, ..., logFClineageL).
+  requires:
+  - adata.uns['tradeseq'] populated by fit_gam
+  - adata.varm['tradeseq_beta'] and adata.varm['tradeseq_Sigma'] present
+  examples:
+  - sve = ts.start_vs_end_test(adata); top = sve['waldStat'].idxmax()
+  - custom = ts.start_vs_end_test(adata, pseudotime_values=(0.1, 0.8))
+  failure_fixes:
+  - when: "KeyError: adata.uns has no key 'tradeseq'"
+    suggest:
+    - Run tradeseq.fit_gam(adata) first.
+  - when: "ValueError: pseudotime_values must be a length-2 sequence"
+    suggest:
+    - Pass exactly two values, e.g. pseudotime_values=(0.1, 0.8).
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.association_test
+  - tradeseq.diff_end_test

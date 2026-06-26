@@ -1,0 +1,43 @@
+id: tradeseq.list_mode_smoothers
+title: Per-smoother statistics (list mode)
+description: >-
+  When you need the per-(gene, smoother) Wald p-values or chi-square statistics,
+  fit_gam must return the per-gene FittedGam objects instead of writing to the
+  AnnData. This short workflow covers that list-mode path. The smoother
+  accessors reject an AnnData by design.
+task_tags:
+- per-smoother-statistics
+- pseudotime
+- nb-gam
+when_to_use:
+- you need summary(gam)$s.table-style p-values / chi-square per smoother
+- you want the raw FittedGam objects (coef_, cov_, summary_s_table) rather than AnnData slots
+when_not_to_use:
+- you only need the standard Wald tests (use the trajectory_de workflow on an AnnData)
+inputs:
+- name: adata
+  kind: anndata.AnnData
+  description: Same container fit_gam expects (raw counts + pseudotime + cell weights).
+  requirements:
+  - layers['counts'], obsm['pseudotime'], obsm['cell_weights'] populated
+steps:
+- symbol: tradeseq.fit_gam
+  purpose: Fit in list mode - returns dict[gene, FittedGam] and does NOT mutate the AnnData.
+  args:
+    n_knots: 6
+    return_models: true
+  notes:
+  - The returned dict is the required input for both accessors below; failed fits appear as None.
+- symbol: tradeseq.get_smoother_pvalues
+  purpose: Stack per-(gene, smoother) Wald p-values into a DataFrame.
+  args: {}
+  notes:
+  - Pass the dict from the previous step, not an AnnData (TypeError otherwise).
+- symbol: tradeseq.get_smoother_test_stats
+  purpose: Stack the matching per-(gene, smoother) chi-square statistics.
+  args: {}
+  notes: []
+templates: []
+outputs:
+- dict[str, FittedGam] from fit_gam(return_models=True)
+- two (n_genes x n_smoothers) DataFrames of p-values and chi-square statistics

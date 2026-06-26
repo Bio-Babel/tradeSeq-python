@@ -1,0 +1,42 @@
+schema_version: 1
+repo: https://github.com/Bio-Babel/tradeSeq-python
+distribution: tradeSeq-python
+import_name: tradeseq
+display_name: tradeSeq-python — trajectory-based differential expression (NB-GAM) for single-cell (R tradeSeq port)
+contract_class: analysis
+tier: 2
+maturity: beta
+r_package:
+  package: tradeSeq
+  repo: https://github.com/statOmics/tradeSeq
+  version_or_commit: 1.13.12 @ 02a9050
+  fidelity: partial
+# Hard install dependencies that the *visualization* layer is built on. The
+# analysis core (fit_gam + the Wald battery + predict/cluster/cascade compute)
+# is pure numpy/scipy/statsmodels/sklearn and has no Bio-Babel foundation; only
+# plot_smoothers / plot_gene_count (ggplot2_py), plot_evaluatek_results
+# (patchwork) and plot_cascade (pheatmap) reach into the graphics stack.
+foundation:
+- ggplot2_py
+- patchwork
+- pheatmap
+# Declared inline (the .py skeleton lives at templates/trajectory_de.py; the
+# templates/ dir only carries that script, no template YAML to hydrate).
+templates:
+- id: tradeseq.trajectory_de_script
+  path: templates/trajectory_de.py
+  task_tags:
+  - trajectory-differential-expression
+  - pseudotime
+  - nb-gam
+  description: >-
+    End-to-end NB-GAM trajectory DE recipe on an AnnData that already carries
+    pseudotime + cell weights: evaluate_k → fit_gam → the within/between-lineage
+    Wald battery → top-gene visualization.
+  parameters: []
+  code_template: ''
+  expected_artifacts:
+  - AnnData mutated in place with var.tradeseq_converged, varm.tradeseq_beta, varm.tradeseq_Sigma, uns.tradeseq
+  - association_test / start_vs_end_test / pattern_test result DataFrames
+  notes:
+  - The container must already hold a trajectory (obsm.pseudotime + obsm.cell_weights); tradeSeq does not infer one.

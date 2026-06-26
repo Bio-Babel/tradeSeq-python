@@ -1,0 +1,60 @@
+# List-mode-only accessors: these read the per-smoother summary table off each
+# FittedGam, so they REQUIRE fit_gam(return_models=True) and reject an AnnData.
+- id: tradeseq.get_smoother_pvalues
+  import_path: tradeseq.get_smoother_pvalues
+  kind: function
+  signature: get_smoother_pvalues(models) -> pandas.DataFrame
+  purpose: Per-(gene, smoother) Wald p-values from the fitted-model dict.
+  description: >-
+    Port of tradeSeq::getSmootherPvalues. Stacks the smoother-specific p-values
+    (summary(m)$s.table[, "p-value"]) into a (n_genes, n_smoothers) DataFrame.
+    This is a list-mode-only contract - pass the dict from
+    fit_gam(return_models=True), not an AnnData.
+  parameters:
+  - name: models
+    type: dict[str, FittedGam]
+    required: true
+    description: Output of fit_gam(..., return_models=True).
+  mutates: ''
+  returns: pandas.DataFrame (n_genes, n_smoothers) of p-values; errored fits become NaN rows.
+  requires:
+  - models is the dict returned by fit_gam(return_models=True)
+  examples:
+  - fits = ts.fit_gam(adata, n_knots=6, return_models=True)
+  - pvals = ts.get_smoother_pvalues(fits)
+  failure_fixes:
+  - when: "TypeError when an AnnData is passed"
+    suggest:
+    - Re-run fit_gam with return_models=True and pass the resulting dict.
+    explanation: The per-smoother summary table only exists on FittedGam objects, not in the AnnData slots.
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.get_smoother_test_stats
+
+- id: tradeseq.get_smoother_test_stats
+  import_path: tradeseq.get_smoother_test_stats
+  kind: function
+  signature: get_smoother_test_stats(models) -> pandas.DataFrame
+  purpose: Per-(gene, smoother) Wald chi-square statistics from the fitted-model dict.
+  description: >-
+    Port of tradeSeq::getSmootherTestStats. Same shape and list-mode-only
+    contract as get_smoother_pvalues but returns the chi-square statistics
+    (summary(m)$s.table[, "Chi.sq"]).
+  parameters:
+  - name: models
+    type: dict[str, FittedGam]
+    required: true
+    description: Output of fit_gam(..., return_models=True).
+  mutates: ''
+  returns: pandas.DataFrame (n_genes, n_smoothers) of chi-square statistics; errored fits become NaN rows.
+  requires:
+  - models is the dict returned by fit_gam(return_models=True)
+  examples:
+  - stats = ts.get_smoother_test_stats(fits)
+  failure_fixes:
+  - when: "TypeError when an AnnData is passed"
+    suggest:
+    - Re-run fit_gam with return_models=True and pass the resulting dict.
+  related:
+  - tradeseq.fit_gam
+  - tradeseq.get_smoother_pvalues

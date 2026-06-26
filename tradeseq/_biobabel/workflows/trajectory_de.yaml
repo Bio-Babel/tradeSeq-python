@@ -1,0 +1,75 @@
+id: tradeseq.trajectory_de
+title: Trajectory differential expression (NB-GAM)
+description: >-
+  The canonical tradeSeq workflow: choose a knot count, fit a per-gene
+  negative-binomial GAM along each lineage, then run the Wald battery for
+  within- and between-lineage differential expression and visualize the top
+  genes. Assumes the AnnData already carries a trajectory (pseudotime + cell
+  weights); tradeSeq consumes a trajectory, it does not infer one.
+task_tags:
+- trajectory-differential-expression
+- pseudotime
+- lineage-analysis
+- nb-gam
+- find-trajectory-driving-genes
+when_to_use:
+- differential expression along / between single-cell trajectory lineages
+- find progenitor vs differentiated markers after slingshot / monocle pseudotime
+- find genes with different expression patterns between branches
+when_not_to_use:
+- no trajectory is available yet (run a trajectory-inference method first; tradeSeq does not build one)
+- you only need cluster-level marker genes (use a standard DE test, not an NB-GAM)
+inputs:
+- name: adata
+  kind: anndata.AnnData
+  description: Cells x genes container with raw counts in layers['counts'] and a trajectory in obsm['pseudotime'] + obsm['cell_weights'].
+  requirements:
+  - layers['counts'] holds raw (non-negative) counts
+  - obsm['pseudotime'] and obsm['cell_weights'] are (cells x lineages), no NaNs, same shape
+steps:
+- symbol: tradeseq.evaluate_k
+  purpose: Choose n_knots by comparing per-gene AIC across candidate knot counts. Returns an AIC matrix; does not mutate adata.
+  args:
+    k_range: range(3, 8)
+    n_genes: 200
+    plot: false
+  notes:
+  - Inspect with plot_evaluatek_results; the elbow of the mean-relative-AIC panel suggests n_knots.
+- symbol: tradeseq.fit_gam
+  purpose: Fit the NB-GAM per gene along each lineage. Mutates adata in place, writing var/varm/uns['tradeseq'] - the prerequisite state for every step below.
+  args:
+    n_knots: 6
+  notes:
+  - 'writes: var.tradeseq_converged, varm.tradeseq_beta, varm.tradeseq_Sigma, uns.tradeseq'
+  - Add conditions_key=... here if you intend to run condition_test; add return_models=True instead for the get_smoother_* path.
+- symbol: tradeseq.association_test
+  purpose: Within-lineage - which genes change at all along pseudotime. Returns a per-gene DataFrame.
+  args: {}
+  notes:
+  - 'requires: uns.tradeseq, varm.tradeseq_beta, varm.tradeseq_Sigma'
+- symbol: tradeseq.start_vs_end_test
+  purpose: Within-lineage - progenitor vs differentiated markers (start vs end of each lineage).
+  args: {}
+  notes:
+  - Sort by waldStat to rank; pass pseudotime_values=(t0, t1) to compare arbitrary points.
+- symbol: tradeseq.diff_end_test
+  purpose: Between-lineage - genes with different endpoint expression across lineages (needs >= 2 lineages).
+  args: {}
+  notes:
+  - 'requires: a branching trajectory'
+- symbol: tradeseq.pattern_test
+  purpose: Between-lineage - genes whose expression PATTERN differs between lineages. Combine with diff_end_test to surface transient markers.
+  args: {}
+  notes:
+  - Genes high in pattern_test but low in diff_end_test are transient-expression candidates.
+- symbol: tradeseq.plot_smoothers
+  purpose: Visualize the fitted smoothers for a top gene (ggplot2_py figure).
+  args: {}
+  notes:
+  - Pair with plot_gene_count(adata, gene=...) to colour the embedding by that gene.
+templates:
+- tradeseq.trajectory_de_script
+outputs:
+- AnnData mutated in place with var.tradeseq_converged, varm.tradeseq_beta, varm.tradeseq_Sigma, uns.tradeseq
+- per-gene DataFrames from association_test / start_vs_end_test / diff_end_test / pattern_test (indexed by gene)
+- ggplot2_py figures from plot_smoothers / plot_gene_count

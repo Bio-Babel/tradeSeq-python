@@ -28,11 +28,23 @@ dependencies = [
 dev = ["pytest", "pytest-cov", "ruff"]
 docs = ["mkdocs", "mkdocstrings[python]", "mkdocs-material", "mkdocs-jupyter"]
 
+# biobabel producer contract. The load-bearing line is the biobabel.manifest
+# entry point — biobabel discovers the package by iterating that group and
+# calling get_manifest(). [tool.biobabel] is convenience metadata only.
+[tool.biobabel]
+contract_class = "analysis"
+
+[project.entry-points."biobabel.manifest"]
+tradeseq = "tradeseq._biobabel:get_manifest"
+
 [tool.hatch.build.targets.wheel]
 packages = ["tradeseq"]
 include = [
   "tradeseq/resources/*.h5ad",
   "tradeseq/py.typed",
+  "tradeseq/_biobabel/**/*.yaml",
+  "tradeseq/_biobabel/**/*.md",
+  "tradeseq/_biobabel/**/*.py",
 ]
 
 [tool.hatch.build.targets.sdist]
